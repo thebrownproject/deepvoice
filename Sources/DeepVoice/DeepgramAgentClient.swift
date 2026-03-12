@@ -303,9 +303,9 @@ final class DeepgramAgentClient: NSObject, @unchecked Sendable {
         timer.setEventHandler { [weak self] in
             self?.sendKeepAliveIfIdle()
         }
-        timer.resume()
         keepaliveTimer = timer
         scheduleNextKeepAlive()
+        timer.resume()
     }
 
     private func stopKeepalive() {
