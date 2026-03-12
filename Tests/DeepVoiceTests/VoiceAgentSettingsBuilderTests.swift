@@ -17,10 +17,11 @@ final class VoiceAgentSettingsBuilderTests: XCTestCase {
         let listen = try requireDictionary(agent["listen"])
         let listenProvider = try requireDictionary(listen["provider"])
         XCTAssertEqual(listenProvider["model"] as? String, DeepVoiceConfig.defaults.sttModel)
+        XCTAssertEqual(listenProvider["version"] as? String, "v2")
         XCTAssertNil(listenProvider["smart_format"], "Flux models should not set smart_format")
 
         let think = try requireDictionary(agent["think"])
-        XCTAssertEqual(think["context_length"] as? Int, 12000)
+        XCTAssertNil(think["context_length"])
 
         let endpoint = try requireDictionary(think["endpoint"])
         let headers = try requireDictionary(endpoint["headers"])
@@ -47,6 +48,7 @@ final class VoiceAgentSettingsBuilderTests: XCTestCase {
         let listenProvider = try requireDictionary(listen["provider"])
 
         XCTAssertEqual(listenProvider["model"] as? String, "nova-3")
+        XCTAssertEqual(listenProvider["version"] as? String, "v1")
         XCTAssertEqual(listenProvider["smart_format"] as? Bool, true)
     }
 

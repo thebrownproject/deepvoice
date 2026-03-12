@@ -143,6 +143,12 @@ Current test coverage focuses on non-UI runtime logic:
 - safe-mode tool registration behavior
 - `safe_bash` high-output truncation
 
+Current Voice Agent settings behavior:
+- Flux models use Deepgram STT `version: v2`
+- non-Flux Deepgram STT models use `version: v1`
+- Flux omits `smart_format`, while non-Flux Deepgram STT enables it
+- the app relies on Deepgram's default context window behavior instead of forcing `context_length`
+
 ## API Keys
 
 Set via Settings UI (Option+Shift+S) or stored in macOS Keychain:

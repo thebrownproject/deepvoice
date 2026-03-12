@@ -58,7 +58,6 @@ enum VoiceAgentSettingsBuilder {
         greeting: String?
     ) -> [String: Any] {
         var agent: [String: Any] = [
-            "language": "en",
             "listen": listenSettings(config: config),
             "think": thinkSettings(
                 config: config,
@@ -79,6 +78,7 @@ enum VoiceAgentSettingsBuilder {
         var provider: [String: Any] = [
             "type": config.sttProvider,
             "model": config.sttModel,
+            "version": sttVersion(for: config.sttModel),
         ]
         if !config.sttModel.lowercased().hasPrefix("flux") {
             provider["smart_format"] = true
@@ -86,6 +86,10 @@ enum VoiceAgentSettingsBuilder {
         return [
             "provider": provider,
         ]
+    }
+
+    private static func sttVersion(for model: String) -> String {
+        model.lowercased().hasPrefix("flux") ? "v2" : "v1"
     }
 
     // MARK: - Think (LLM)
@@ -112,7 +116,6 @@ enum VoiceAgentSettingsBuilder {
                 ],
             ] as [String: Any],
             "prompt": Prompts.system,
-            "context_length": 12000,
         ]
 
         let functions = toolFunctions(from: toolRegistry)

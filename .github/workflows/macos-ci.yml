@@ -16,7 +16,12 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
+
+      - name: Select Swift toolchain
+        uses: swift-actions/setup-swift@65540b95f51493d65f5e59e97dcef9629ddf11bf
+        with:
+          swift-version: "5.9"
 
       - name: Show macOS toolchain
         run: |

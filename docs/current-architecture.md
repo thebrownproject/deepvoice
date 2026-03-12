@@ -82,10 +82,12 @@ This builds the Voice Agent `Settings` payload from live runtime config.
 Current defaults:
 
 - STT model: `flux-general-en`
+- STT API version: `v2` for Flux, `v1` for non-Flux Deepgram STT models
 - TTS model: `aura-2-asteria-en`
 - `flags.history = false`
-- `context_length = 12000`
 - OpenRouter title header: `X-OpenRouter-Title`
+
+The runtime intentionally does not force `context_length` right now. It relies on Deepgram's default behavior unless there is a measured reason to override it.
 
 ## Runtime Behavior
 
