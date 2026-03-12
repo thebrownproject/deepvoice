@@ -2,11 +2,10 @@
 
 Voice-first AI desktop companion for macOS. Pure Swift app with a single WebSocket to Deepgram's Voice Agent API for server-side STT + LLM + TTS orchestration. BYO LLM via OpenRouter, client-side tool execution, and a dev console UI.
 
-**Core loop:** Press hotkey -> speak naturally -> Deepgram transcribes -> LLM reasons (Claude via OpenRouter) -> Deepgram speaks back -> tools execute locally on your Mac
+**Core loop:** Press hotkey -> speak naturally -> Deepgram transcribes -> LLM reasons (via OpenRouter) -> Deepgram speaks back -> tools execute locally on your Mac
 
 **Mental model:** One WebSocket handles everything. No Python backend. No local LLM. The Deepgram Voice Agent API orchestrates speech-to-text, LLM inference, and text-to-speech server-side. Your Mac just sends audio and runs tool calls.
 
----
 
 ## Architecture
 
@@ -20,8 +19,8 @@ macOS App (SwiftUI/AppKit, AVAudioEngine, hotkey, dev console)
     v
 Deepgram Voice Agent API (server-side orchestration)
     |-- STT: Deepgram Nova-3
-    |-- LLM: BYO via OpenRouter (anthropic/claude-sonnet-4)
-    |-- TTS: Deepgram Aura
+    |-- LLM: BYO via OpenRouter (google/gemini-3.1-flash-lite-preview)
+    |-- TTS: Deepgram Aura-2 (aura-2-vesta-en)
     |-- Function calling: client-side (FunctionCallRequest/Response)
 ```
 
@@ -29,7 +28,7 @@ Deepgram Voice Agent API (server-side orchestration)
 
 **App:** Swift 5.9 . SwiftUI . AppKit . AVAudioEngine . URLSessionWebSocketTask
 
-**Voice Pipeline:** Deepgram Voice Agent API (Nova-3 STT + Aura TTS) . OpenRouter (BYO LLM)
+**Voice Pipeline:** Deepgram Voice Agent API (Nova-3 STT + Aura-2 TTS) . OpenRouter (BYO LLM)
 
 **Tools:** Client-side execution via function calling -- bash, files, AppleScript, screen capture, web search, deep reasoning
 
@@ -66,7 +65,7 @@ Deepgram Voice Agent API (server-side orchestration)
 
 **Settings**
 - API key management (Deepgram, OpenRouter, OpenAI) stored in Keychain
-- Voice selection (12 Deepgram Aura voices)
+- Voice selection (12 Aura-2 + 3 legacy Aura-1 voices)
 - LLM model selection (any OpenRouter model)
 - Global hotkey configuration
 - Safe mode and destructive action confirmation toggles
@@ -101,7 +100,7 @@ DeepVoice/
         OpenAIClient.swift            # Shared OpenAI API caller and model constants
 
         # Audio
-        AudioManager.swift            # AVAudioEngine capture (24kHz PCM16) + playback
+        AudioManager.swift            # Separate AVAudioEngine capture (built-in mic) + playback (system output)
 
         # Infrastructure
         Config.swift                  # DeepVoiceConfig (providers, model, voice)
@@ -132,7 +131,7 @@ Set via Settings UI (Option+Shift+S) or stored in macOS Keychain:
 | Key | Purpose |
 |-----|---------|
 | Deepgram | Voice Agent API (STT + TTS orchestration) |
-| OpenRouter | BYO LLM (Claude Sonnet 4 by default) |
+| OpenRouter | BYO LLM (gemini-3.1-flash-lite-preview by default) |
 | OpenAI | reason_deeply delegation, web_search, capture_display vision |
 
 ## Data Storage
@@ -155,6 +154,8 @@ Keychain: `com.thebrownproject.deepvoice` service.
 4. **Shell metacharacter blocking** -- safe_bash rejects `;|&\`$(){}\\!<>\n\r` before allowlist check to prevent injection
 5. **No Python backend** -- eliminates the local server, IPC protocol, and process management. One process, one WebSocket.
 6. **Dev console over floating widget** -- explicit visibility into agent state, logs, and tool calls during development
+7. **Separate audio engines** -- Capture and playback use independent AVAudioEngine instances to prevent Bluetooth HFP mode switch when AirPods mic is used. Capture engine forces built-in mic via CoreAudio.
+8. **ConfigStore as single source of truth** -- `@Observable` ConfigStore shared via SwiftUI `.environment()`. Settings UI binds directly. Config changes propagate live to ToolRegistry via `withObservationTracking`.
 
 ## Background
 

@@ -12,8 +12,8 @@ Swift macOS App
     v
 Deepgram Voice Agent API (server-side orchestration)
     |-- STT: Deepgram Nova-3
-    |-- LLM: BYO via OpenRouter (anthropic/claude-sonnet-4)
-    |-- TTS: Deepgram Aura
+    |-- LLM: BYO via OpenRouter (google/gemini-3.1-flash-lite-preview)
+    |-- TTS: Deepgram Aura-2 (aura-2-vesta-en)
     |-- Function calling: client-side (FunctionCallRequest/Response)
 ```
 
@@ -33,7 +33,7 @@ Set via Settings UI (Option+Shift+S), stored in macOS Keychain (`com.thebrownpro
 | Key | Account | Used For |
 |-----|---------|----------|
 | Deepgram | `deepgramAPIKey` | Voice Agent API (STT + TTS) |
-| OpenRouter | `openRouterAPIKey` | BYO LLM (Claude Sonnet 4) |
+| OpenRouter | `openRouterAPIKey` | BYO LLM (configurable, default: gemini-3.1-flash-lite-preview) |
 | OpenAI | `openAIAPIKey` | reason_deeply, web_search, capture_display vision |
 
 ## Voice Agent Protocol
@@ -76,8 +76,8 @@ All 8 tools execute client-side. Voice Agent sends `FunctionCallRequest`, app ru
 | `file_write` | FileTools.swift | If confirmDestructive | Auto-creates parent dirs |
 | `frontmost_app_context` | DesktopTools.swift | No | macOS Accessibility API |
 | `capture_display` | DesktopTools.swift | No | Screen capture + OpenAI vision |
-| `reason_deeply` | AITools.swift | No | gpt-5-mini delegation, 2 retries |
-| `web_search` | AITools.swift | No | OpenAI Responses API |
+| `reason_deeply` | AITools.swift | No | gpt-5-mini delegation, 2 retries (requires OpenAI key) |
+| `web_search` | AITools.swift | No | OpenAI Responses API (requires OpenAI key) |
 
 ## Key Design Decisions
 
@@ -86,16 +86,21 @@ All 8 tools execute client-side. Voice Agent sends `FunctionCallRequest`, app ru
 3. **Client-side function calling** -- all tools run locally on the Mac, results sent back through the WebSocket
 4. **Shell metacharacter blocking** -- safe_bash rejects `;|&\`$(){}\\!<>\n\r` before allowlist check to prevent injection
 5. **Approval flow via async continuations** -- FunctionCallHandler suspends, AppDelegate shows UI, continuation resumes on approve/reject
+6. **Separate audio engines** -- Capture and playback use independent AVAudioEngine instances to prevent Bluetooth HFP mode switch (which degrades all system audio when AirPods mic is used). Capture engine forces built-in mic via CoreAudio.
+7. **ConfigStore as single source of truth** -- `@Observable` ConfigStore shared via SwiftUI `.environment()`. Settings UI binds directly to it. Config changes propagate live to ToolRegistry via `withObservationTracking`.
+8. **Safe mode blocks destructive tools at execute time** -- When enabled, `ToolRegistry.execute()` rejects destructive tools before running the handler. Off by default.
 
 ## Conventions
 
 - Swift 5.9, macOS 14+, SwiftUI + AppKit hybrid
 - `@MainActor` for all UI state, `DispatchQueue` for audio/network threads
-- `@unchecked Sendable` for classes with manual synchronization
+- `@unchecked Sendable` for classes with manual synchronization (AudioManager, DeepgramAgentClient, ToolRegistry)
+- `@Observable` + `@Environment` for SwiftUI state (ConfigStore, DevConsoleState). Use `@Bindable var store = configStore` inside `body` to get bindings.
 - Errors returned as strings to LLM (never crash on tool failure)
 - Latency values from Voice Agent API are in seconds, converted to ms for display
 - All tool handlers have signature `(String) async throws -> String`
 - File-level `Logger` instances with subsystem `com.thebrownproject.deepvoice`
+- Audio state (isCapturing, isPlaying) pushed from AudioManager to DevConsoleState via callback, not computed properties (bridges `@unchecked Sendable` and `@Observable`)
 
 ## Data Storage
 
