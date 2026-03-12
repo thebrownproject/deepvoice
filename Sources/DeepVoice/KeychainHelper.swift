@@ -13,6 +13,14 @@ enum KeychainAccount: String, CaseIterable {
 enum KeychainHelper {
     private static let service = "com.thebrownproject.deepvoice"
 
+    private static func notifyKeyChange(for account: KeychainAccount) {
+        NotificationCenter.default.post(
+            name: .deepVoiceAPIKeysDidChange,
+            object: nil,
+            userInfo: ["account": account.rawValue]
+        )
+    }
+
     private static func baseQuery(for account: KeychainAccount) -> [String: Any] {
         [
             kSecClass as String: kSecClassGenericPassword,
@@ -38,6 +46,7 @@ enum KeychainHelper {
         let status = SecItemAdd(addQuery as CFDictionary, nil)
         if status == errSecSuccess {
             log.info("Key saved for \(account.rawValue)")
+            notifyKeyChange(for: account)
             return true
         }
         log.error("Failed to save key for \(account.rawValue) (status: \(status))")
@@ -65,6 +74,7 @@ enum KeychainHelper {
         let status = SecItemDelete(baseQuery(for: account) as CFDictionary)
         if status == errSecSuccess || status == errSecItemNotFound {
             log.info("Key deleted for \(account.rawValue)")
+            notifyKeyChange(for: account)
             return true
         }
         log.error("Failed to delete key for \(account.rawValue) (status: \(status))")

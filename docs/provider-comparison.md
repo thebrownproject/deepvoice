@@ -1,5 +1,9 @@
 # Provider Comparison
 
+Historical note: this file records provider research from the earlier migration spike.
+
+Some recommendations here predate the current DeepVoice defaults. For the current runtime design, see `docs/current-architecture.md`.
+
 ## Current Cost Profile (OpenAI Only)
 
 Based on a test session with ~620K input tokens on gpt-realtime:

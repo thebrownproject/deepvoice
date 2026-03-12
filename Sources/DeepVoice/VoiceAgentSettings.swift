@@ -24,10 +24,29 @@ enum VoiceAgentSettingsBuilder {
                 openRouterKey: openRouterKey,
                 greeting: greeting
             ),
+            "flags": [
+                "history": false,
+            ],
         ]
         // Opt out of Deepgram model improvement program for privacy
         settings["mip_opt_out"] = true
         return settings
+    }
+
+    static func buildThinkConfig(
+        config: DeepVoiceConfig,
+        toolRegistry: ToolRegistry,
+        openRouterKey: String
+    ) -> [String: Any] {
+        thinkSettings(
+            config: config,
+            toolRegistry: toolRegistry,
+            openRouterKey: openRouterKey
+        )
+    }
+
+    static func buildSpeakConfig(config: DeepVoiceConfig) -> [String: Any] {
+        speakSettings(config: config)
     }
 
     // MARK: - Audio
@@ -55,8 +74,7 @@ enum VoiceAgentSettingsBuilder {
         greeting: String?
     ) -> [String: Any] {
         var agent: [String: Any] = [
-            "language": "en",
-            "listen": listenSettings(),
+            "listen": listenSettings(config: config),
             "think": thinkSettings(
                 config: config,
                 toolRegistry: toolRegistry,
@@ -72,13 +90,22 @@ enum VoiceAgentSettingsBuilder {
 
     // MARK: - Listen (STT)
 
-    private static func listenSettings() -> [String: Any] {
-        [
-            "provider": [
-                "type": "deepgram",
-                "model": "nova-3",
-            ],
+    private static func listenSettings(config: DeepVoiceConfig) -> [String: Any] {
+        var provider: [String: Any] = [
+            "type": config.sttProvider,
+            "model": config.sttModel,
+            "version": sttVersion(for: config.sttModel),
         ]
+        if !config.sttModel.lowercased().hasPrefix("flux") {
+            provider["smart_format"] = true
+        }
+        return [
+            "provider": provider,
+        ]
+    }
+
+    private static func sttVersion(for model: String) -> String {
+        model.lowercased().hasPrefix("flux") ? "v2" : "v1"
     }
 
     // MARK: - Think (LLM)
@@ -101,7 +128,7 @@ enum VoiceAgentSettingsBuilder {
                 "headers": [
                     "Authorization": "Bearer \(openRouterKey)",
                     "HTTP-Referer": "https://github.com/thebrownproject/deepvoice",
-                    "X-Title": "DeepVoice",
+                    "X-OpenRouter-Title": "DeepVoice",
                 ],
             ] as [String: Any],
             "prompt": Prompts.system,
@@ -120,7 +147,7 @@ enum VoiceAgentSettingsBuilder {
     private static func speakSettings(config: DeepVoiceConfig) -> [String: Any] {
         [
             "provider": [
-                "type": "deepgram",
+                "type": config.ttsProvider,
                 "model": config.voice,
             ],
         ]

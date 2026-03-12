@@ -1,5 +1,9 @@
 # Pipecat Migration - Architecture
 
+Historical note: this file documents an earlier Pipecat migration investigation and is not the current DeepVoice runtime design.
+
+For the current implementation, see `docs/current-architecture.md`.
+
 ## Current Architecture (OpenAI Agents SDK)
 
 ```

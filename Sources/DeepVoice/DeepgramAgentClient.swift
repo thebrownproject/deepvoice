@@ -68,6 +68,7 @@ final class DeepgramAgentClient: NSObject, @unchecked Sendable {
     private var keepaliveTimer: DispatchSourceTimer?
     private var intentionalDisconnect = false
     private var reconnectAttempt = 0
+    private var lastOutboundActivity = Date.distantPast
 
     private let maxReconnectAttempts = 5
     private let maxReconnectDelay: TimeInterval = 30.0
@@ -102,6 +103,7 @@ final class DeepgramAgentClient: NSObject, @unchecked Sendable {
     func sendAudio(_ data: Data) {
         queue.async { [weak self] in
             guard let self, self.isConnected, let task = self.task else { return }
+            self.recordOutboundActivity()
             task.send(.data(data)) { error in
                 if let error {
                     log.error("Audio send failed: \(error.localizedDescription)")
@@ -298,12 +300,12 @@ final class DeepgramAgentClient: NSObject, @unchecked Sendable {
     private func startKeepalive() {
         stopKeepalive()
         let timer = DispatchSource.makeTimerSource(queue: queue)
-        timer.schedule(deadline: .now() + 10, repeating: 10)
         timer.setEventHandler { [weak self] in
-            self?.sendJSON(["type": "KeepAlive"])
+            self?.sendKeepAliveIfIdle()
         }
-        timer.resume()
         keepaliveTimer = timer
+        scheduleNextKeepAlive()
+        timer.resume()
     }
 
     private func stopKeepalive() {
@@ -343,6 +345,7 @@ final class DeepgramAgentClient: NSObject, @unchecked Sendable {
     private func teardown() {
         stopKeepalive()
         isConnected = false
+        lastOutboundActivity = Date.distantPast
         task?.cancel(with: .normalClosure, reason: nil)
         task = nil
         session?.invalidateAndCancel()
@@ -353,18 +356,45 @@ final class DeepgramAgentClient: NSObject, @unchecked Sendable {
 
     private func sendJSON(_ payload: [String: Any]) {
         queue.async { [weak self] in
-            guard let self, self.isConnected, let task = self.task else { return }
-            guard let data = try? JSONSerialization.data(withJSONObject: payload),
-                  let text = String(data: data, encoding: .utf8) else {
-                log.error("Failed to serialize JSON message")
-                return
-            }
-            task.send(.string(text)) { error in
-                if let error {
-                    log.error("Send failed: \(error.localizedDescription)")
-                }
+            self?.sendJSONOnQueue(payload)
+        }
+    }
+
+    private func sendJSONOnQueue(_ payload: [String: Any]) {
+        guard isConnected, let task = task else { return }
+        guard let data = try? JSONSerialization.data(withJSONObject: payload),
+              let text = String(data: data, encoding: .utf8) else {
+            log.error("Failed to serialize JSON message")
+            return
+        }
+        recordOutboundActivity()
+        task.send(.string(text)) { error in
+            if let error {
+                log.error("Send failed: \(error.localizedDescription)")
             }
         }
+    }
+
+    private func sendKeepAliveIfIdle() {
+        guard isConnected else { return }
+        let now = Date()
+        let nextDelay = VoiceAgentKeepAlivePolicy.nextDelay(since: lastOutboundActivity, now: now)
+        guard nextDelay == 0 else {
+            scheduleNextKeepAlive(after: nextDelay)
+            return
+        }
+        sendJSONOnQueue(["type": "KeepAlive"])
+    }
+
+    private func scheduleNextKeepAlive(after delay: TimeInterval? = nil) {
+        guard let keepaliveTimer else { return }
+        let nextDelay = delay ?? VoiceAgentKeepAlivePolicy.nextDelay(since: lastOutboundActivity)
+        keepaliveTimer.schedule(deadline: .now() + nextDelay)
+    }
+
+    private func recordOutboundActivity(now: Date = Date()) {
+        lastOutboundActivity = now
+        scheduleNextKeepAlive(after: VoiceAgentKeepAlivePolicy.interval)
     }
 }
 
@@ -380,6 +410,7 @@ extension DeepgramAgentClient: URLSessionWebSocketDelegate {
             guard let self else { return }
             self.isConnected = true
             self.reconnectAttempt = 0
+            self.recordOutboundActivity()
             self.startKeepalive()
             self.startReceiving()
             log.info("Connected to Deepgram Voice Agent")

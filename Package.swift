@@ -14,5 +14,10 @@ let package = Package(
             dependencies: ["KeyboardShortcuts"],
             path: "Sources/DeepVoice"
         ),
+        .testTarget(
+            name: "DeepVoiceTests",
+            dependencies: ["DeepVoice"],
+            path: "Tests/DeepVoiceTests"
+        ),
     ]
 )
