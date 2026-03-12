@@ -17,8 +17,7 @@ enum AudioConstants {
     )!
 }
 
-@MainActor
-final class AudioManager: ObservableObject {
+final class AudioManager: ObservableObject, @unchecked Sendable {
     @Published private(set) var isCapturing = false
     @Published private(set) var isPlaying = false
     @Published private(set) var permissionGranted = false
@@ -43,17 +42,17 @@ final class AudioManager: ObservableObject {
         let status = AVCaptureDevice.authorizationStatus(for: .audio)
         switch status {
         case .authorized:
-            permissionGranted = true
+            updatePermission(true)
             return true
         case .notDetermined:
             let granted = await AVCaptureDevice.requestAccess(for: .audio)
-            permissionGranted = granted
+            updatePermission(granted)
             return granted
         case .denied, .restricted:
-            permissionGranted = false
+            updatePermission(false)
             return false
         @unknown default:
-            permissionGranted = false
+            updatePermission(false)
             return false
         }
     }
@@ -79,12 +78,10 @@ final class AudioManager: ObservableObject {
             guard let self else { return }
             do {
                 try self.setupAndStart(onChunk: onAudioData)
-                DispatchQueue.main.async {
-                    onCaptureStarted?()
-                }
+                DispatchQueue.main.async { onCaptureStarted?() }
             } catch {
                 log.error("Capture start failed: \(error.localizedDescription)")
-                DispatchQueue.main.async { self.isCapturing = false }
+                self.updateCaptureState(false)
             }
         }
     }
@@ -95,7 +92,7 @@ final class AudioManager: ObservableObject {
             self.capturing = false
             self.teardownCapture()
         }
-        isCapturing = false
+        updateCaptureState(false)
     }
 
     func suppressPlayback() {
@@ -107,8 +104,9 @@ final class AudioManager: ObservableObject {
             self.samplesPlayed = 0
             self.playerNode?.stop()
             self.playerNode?.reset()
-            DispatchQueue.main.async { self.isPlaying = false }
-            log.debug("Playback suppressed (epoch \(self.playbackEpoch))")
+            self.updatePlaybackState(false)
+            let epoch = self.playbackEpoch
+            log.debug("Playback suppressed (epoch \(epoch))")
         }
     }
 
@@ -134,7 +132,7 @@ final class AudioManager: ObservableObject {
             guard let self else { return }
             self.teardownPlayback()
         }
-        isPlaying = false
+        updatePlaybackState(false)
     }
 
     /// Safe to call from any thread -- all work is dispatched to playbackQueue.
@@ -151,7 +149,7 @@ final class AudioManager: ObservableObject {
             }
 
             guard let player = self.playerNode,
-                  let buffer = self.pcm16DataToBuffer(data) else { return }
+                  let buffer = Self.pcm16DataToBuffer(data) else { return }
 
             let epoch = self.playbackEpoch
             let scheduled = UInt64(buffer.frameLength)
@@ -159,9 +157,9 @@ final class AudioManager: ObservableObject {
             self.samplesScheduled += scheduled
 
             if wasIdle {
-                DispatchQueue.main.async {
-                    self.isPlaying = true
-                    self.onPlaybackStarted?()
+                self.updatePlaybackState(true)
+                DispatchQueue.main.async { [weak self] in
+                    self?.onPlaybackStarted?()
                 }
             }
 
@@ -170,7 +168,7 @@ final class AudioManager: ObservableObject {
                     guard let self, self.playbackEpoch == epoch else { return }
                     self.samplesPlayed += scheduled
                     if self.samplesPlayed >= self.samplesScheduled {
-                        DispatchQueue.main.async { self.isPlaying = false }
+                        self.updatePlaybackState(false)
                     }
                 }
             }
@@ -208,7 +206,7 @@ final class AudioManager: ObservableObject {
         }
     }
 
-    private func pcm16DataToBuffer(_ data: Data) -> AVAudioPCMBuffer? {
+    private static func pcm16DataToBuffer(_ data: Data) -> AVAudioPCMBuffer? {
         let bytesPerSample = 2
         let frameCount = AVAudioFrameCount(data.count / bytesPerSample)
         guard frameCount > 0 else { return nil }
@@ -261,7 +259,7 @@ final class AudioManager: ObservableObject {
         engine.attach(mixer)
         engine.connect(input, to: mixer, format: captureFormat)
 
-        var audioConverter: AVAudioConverter?
+        let audioConverter: AVAudioConverter?
         if captureFormat != targetFormat {
             audioConverter = AVAudioConverter(from: captureFormat, to: targetFormat)
             guard audioConverter != nil else {
@@ -273,13 +271,13 @@ final class AudioManager: ObservableObject {
             onBus: 0,
             bufferSize: AudioConstants.captureBufferSize,
             format: captureFormat
-        ) { [weak self] buffer, _ in
+        ) { [weak self, audioConverter, targetFormat] buffer, _ in
             self?.audioQueue.async { [weak self] in
                 guard let self, self.capturing else { return }
 
                 let floatBuffer: AVAudioPCMBuffer
                 if let conv = audioConverter {
-                    guard let converted = self.convert(buffer: buffer, using: conv, to: targetFormat) else {
+                    guard let converted = Self.convert(buffer: buffer, using: conv, to: targetFormat) else {
                         return
                     }
                     floatBuffer = converted
@@ -287,7 +285,7 @@ final class AudioManager: ObservableObject {
                     floatBuffer = buffer
                 }
 
-                guard let pcmData = self.float32ToPCM16Data(floatBuffer) else { return }
+                guard let pcmData = Self.float32ToPCM16Data(floatBuffer) else { return }
                 onChunk(pcmData)
             }
         }
@@ -299,7 +297,7 @@ final class AudioManager: ObservableObject {
         captureMixerNode = mixer
         captureConverter = audioConverter
         capturing = true
-        DispatchQueue.main.async { self.isCapturing = true }
+        updateCaptureState(true)
 
         log.info("Capture started: \(inputFormat.channelCount)ch \(Int(inputFormat.sampleRate))Hz -> 24kHz PCM16 mono")
     }
@@ -328,7 +326,7 @@ final class AudioManager: ObservableObject {
         playbackEngine = nil
     }
 
-    private func convert(
+    private static func convert(
         buffer: AVAudioPCMBuffer,
         using converter: AVAudioConverter,
         to targetFormat: AVAudioFormat
@@ -359,7 +357,7 @@ final class AudioManager: ObservableObject {
         return output
     }
 
-    private func float32ToPCM16Data(_ buffer: AVAudioPCMBuffer) -> Data? {
+    private static func float32ToPCM16Data(_ buffer: AVAudioPCMBuffer) -> Data? {
         guard let samples = buffer.floatChannelData?[0] else { return nil }
         let count = Int(buffer.frameLength)
         var data = Data(count: count * 2)
@@ -371,6 +369,36 @@ final class AudioManager: ObservableObject {
             }
         }
         return data
+    }
+
+    private func updatePermission(_ granted: Bool) {
+        if Thread.isMainThread {
+            permissionGranted = granted
+        } else {
+            DispatchQueue.main.async { [weak self] in
+                self?.permissionGranted = granted
+            }
+        }
+    }
+
+    private func updateCaptureState(_ capturing: Bool) {
+        if Thread.isMainThread {
+            isCapturing = capturing
+        } else {
+            DispatchQueue.main.async { [weak self] in
+                self?.isCapturing = capturing
+            }
+        }
+    }
+
+    private func updatePlaybackState(_ playing: Bool) {
+        if Thread.isMainThread {
+            isPlaying = playing
+        } else {
+            DispatchQueue.main.async { [weak self] in
+                self?.isPlaying = playing
+            }
+        }
     }
 }
 

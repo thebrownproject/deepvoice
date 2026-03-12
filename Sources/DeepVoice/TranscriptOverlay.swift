@@ -2,7 +2,7 @@ import AppKit
 import Combine
 import SwiftUI
 
-private let transcriptVisibilityKey = "transcriptVisible"
+let transcriptVisibilityKey = "transcriptVisible"
 
 struct TranscriptEntry: Identifiable {
     let id = UUID()

@@ -271,8 +271,9 @@ final class VoiceAgentRuntime {
 
         observers.append(
             center.addObserver(forName: .deepVoiceAPIKeysDidChange, object: nil, queue: .main) { [weak self] notification in
+                let changedAccount = (notification.userInfo?["account"] as? String).flatMap(KeychainAccount.init(rawValue:))
                 Task { @MainActor [weak self] in
-                    self?.handleAPIKeysDidChange(notification)
+                    self?.handleAPIKeysDidChange(changedAccount: changedAccount)
                 }
             }
         )
@@ -298,8 +299,7 @@ final class VoiceAgentRuntime {
         refreshWarmSession(reason: "settings change")
     }
 
-    private func handleAPIKeysDidChange(_ notification: Notification) {
-        let changedAccount = (notification.userInfo?["account"] as? String).flatMap(KeychainAccount.init(rawValue:))
+    private func handleAPIKeysDidChange(changedAccount: KeychainAccount?) {
         loadAPIKeys(logStatuses: false)
 
         if let changedAccount {

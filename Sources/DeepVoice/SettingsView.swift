@@ -40,7 +40,7 @@ struct SettingsView: View {
     }
 
     private var apiKeysSection: some View {
-        Section("API Keys") {
+        Section {
             KeyField(
                 label: "Deepgram",
                 placeholder: "dg-...",
@@ -68,11 +68,13 @@ struct SettingsView: View {
             Text("Stored securely in macOS Keychain.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+        } header: {
+            Text("API Keys")
         }
     }
 
     private var voiceSection: some View {
-        Section("Voice") {
+        Section {
             LabeledContent("Voice model") {
                 ConfigField(
                     placeholder: DeepVoiceConfig.defaults.voice,
@@ -83,11 +85,13 @@ struct SettingsView: View {
             Text("Use a Deepgram Voice Agent TTS model, for example aura-2-asteria-en.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+        } header: {
+            Text("Voice")
         }
     }
 
     private var modelSection: some View {
-        Section("Models") {
+        Section {
             LabeledContent("LLM") {
                 ConfigField(
                     placeholder: DeepVoiceConfig.defaults.llmModel,
@@ -105,11 +109,13 @@ struct SettingsView: View {
             Text("flux-general-en is the current low-latency default for listening.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+        } header: {
+            Text("Models")
         }
     }
 
     private var hotkeySection: some View {
-        Section("Hotkeys") {
+        Section {
             HStack {
                 Text("Activate")
                 Spacer()
@@ -120,11 +126,13 @@ struct SettingsView: View {
                 Spacer()
                 KeyboardShortcuts.Recorder("", name: .openSettings)
             }
+        } header: {
+            Text("Hotkeys")
         }
     }
 
     private var generalSection: some View {
-        Section("General") {
+        Section {
             Toggle("Safe mode", isOn: $config.safeMode)
             Text("Keep shell use on the allowlist, require approval for shell and AppleScript tools, and hide write tools.")
                 .font(.caption)
@@ -136,6 +144,8 @@ struct SettingsView: View {
             Text("Display live transcript in the console.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+        } header: {
+            Text("General")
         }
     }
 
