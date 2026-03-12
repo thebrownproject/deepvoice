@@ -163,8 +163,9 @@ final class AudioManager: ObservableObject, @unchecked Sendable {
                 }
             }
 
-            player.scheduleBuffer(buffer) { [weak self] in
-                self?.playbackQueue.async {
+            let playbackQueue = self.playbackQueue
+            player.scheduleBuffer(buffer) { [weak self, playbackQueue] in
+                playbackQueue.async { [weak self] in
                     guard let self, self.playbackEpoch == epoch else { return }
                     self.samplesPlayed += scheduled
                     if self.samplesPlayed >= self.samplesScheduled {
@@ -265,6 +266,8 @@ final class AudioManager: ObservableObject, @unchecked Sendable {
             guard audioConverter != nil else {
                 throw AudioCaptureError.converterCreationFailed
             }
+        } else {
+            audioConverter = nil
         }
 
         mixer.installTap(
