@@ -121,7 +121,8 @@ Changes to config or relevant API keys trigger:
 
 - runtime reload
 - tool registry rebuild
-- warm-session refresh when needed
+- live `UpdateThink` / `UpdateSpeak` messages when Deepgram supports the change
+- warm-session refresh when needed (for example STT model changes)
 
 This keeps the settings UI and the actual live runtime in sync.
 

@@ -291,11 +291,17 @@ final class VoiceAgentRuntime {
         let previous = config
         loadConfig(logChange: false)
         guard config != previous else { return }
+        let updatePlan = config.sessionUpdatePlan(comparedTo: previous)
 
         rebuildTooling()
         consoleState.log(
             "Config updated (stt: \(config.sttModel), llm: \(config.llmModel), voice: \(config.voice))"
         )
+
+        if applyLiveConfigUpdateIfPossible(updatePlan) {
+            return
+        }
+
         refreshWarmSession(reason: "settings change")
     }
 
@@ -343,6 +349,45 @@ final class VoiceAgentRuntime {
                 }
             }
         }
+    }
+
+    private func applyLiveConfigUpdateIfPossible(_ updatePlan: SessionConfigUpdatePlan) -> Bool {
+        if updatePlan.requiresReconnect {
+            return false
+        }
+
+        guard updatePlan.needsLiveAgentUpdate else {
+            return true
+        }
+
+        guard agentClient.isConnected else {
+            return true
+        }
+
+        guard agentReady else {
+            consoleState.log("Settings changed while Voice Agent was reconfiguring; refreshing warm session", level: .warning)
+            return false
+        }
+
+        if updatePlan.updateThink {
+            guard let registry = toolRegistry, let openRouterAPIKey else {
+                return false
+            }
+            let thinkConfig = VoiceAgentSettingsBuilder.buildThinkConfig(
+                config: config,
+                toolRegistry: registry,
+                openRouterKey: openRouterAPIKey
+            )
+            agentClient.updateThink(thinkConfig)
+            consoleState.log("Applied live Think update")
+        }
+
+        if updatePlan.updateSpeak {
+            agentClient.updateSpeak(VoiceAgentSettingsBuilder.buildSpeakConfig(config: config))
+            consoleState.log("Applied live Speak update")
+        }
+
+        return true
     }
 
     private func rebuildTooling() {

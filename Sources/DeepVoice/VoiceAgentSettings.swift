@@ -33,6 +33,22 @@ enum VoiceAgentSettingsBuilder {
         return settings
     }
 
+    static func buildThinkConfig(
+        config: DeepVoiceConfig,
+        toolRegistry: ToolRegistry,
+        openRouterKey: String
+    ) -> [String: Any] {
+        thinkSettings(
+            config: config,
+            toolRegistry: toolRegistry,
+            openRouterKey: openRouterKey
+        )
+    }
+
+    static func buildSpeakConfig(config: DeepVoiceConfig) -> [String: Any] {
+        speakSettings(config: config)
+    }
+
     // MARK: - Audio
 
     private static func audioSettings() -> [String: Any] {

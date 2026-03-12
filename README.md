@@ -41,6 +41,7 @@ Deepgram Voice Agent API (server-side orchestration)
 - Full-duplex voice loop: speak naturally, hear responses
 - Barge-in support (interrupt agent while speaking)
 - Warm WebSocket session so Talk only starts/stops mic capture
+- Live `UpdateThink` / `UpdateSpeak` refreshes for compatible settings changes
 - Local latency metrics for capture start, first audio send, first audio receive, and playback start
 - Automatic reconnection with exponential backoff
 - Idle-aware keepalive to maintain the WebSocket connection without extra chatter
