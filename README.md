@@ -19,9 +19,9 @@ macOS App (SwiftUI/AppKit, AVAudioEngine, hotkey, dev console)
     |
     v
 Deepgram Voice Agent API (server-side orchestration)
-    |-- STT: Deepgram Nova-3
+    |-- STT: Deepgram Flux General English
     |-- LLM: BYO via OpenRouter (anthropic/claude-sonnet-4)
-    |-- TTS: Deepgram Aura
+    |-- TTS: Deepgram Aura-2
     |-- Function calling: client-side (FunctionCallRequest/Response)
 ```
 
@@ -29,7 +29,7 @@ Deepgram Voice Agent API (server-side orchestration)
 
 **App:** Swift 5.9 . SwiftUI . AppKit . AVAudioEngine . URLSessionWebSocketTask
 
-**Voice Pipeline:** Deepgram Voice Agent API (Nova-3 STT + Aura TTS) . OpenRouter (BYO LLM)
+**Voice Pipeline:** Deepgram Voice Agent API (Flux STT + Aura-2 TTS) . OpenRouter (BYO LLM)
 
 **Tools:** Client-side execution via function calling -- bash, files, AppleScript, screen capture, web search, deep reasoning
 
@@ -40,20 +40,21 @@ Deepgram Voice Agent API (server-side orchestration)
 **Voice Conversation**
 - Full-duplex voice loop: speak naturally, hear responses
 - Barge-in support (interrupt agent while speaking)
-- Latency metrics (total, TTS, LLM) logged per turn
+- Warm WebSocket session so Talk only starts/stops mic capture
+- Local latency metrics for capture start, first audio send, first audio receive, and playback start
 - Automatic reconnection with exponential backoff
-- 10s keepalive to maintain WebSocket connection
+- Idle-aware keepalive to maintain the WebSocket connection without extra chatter
 
 **Client-Side Tools (8 total)**
 
 | Tool | Purpose | Approval Required |
 |------|---------|-------------------|
-| `safe_bash` | Shell commands via allowlist + metachar rejection | If confirmDestructive |
-| `applescript` | macOS automation via osascript | If confirmDestructive |
+| `safe_bash` | Shell commands via allowlist + metachar rejection | If safeMode or confirmDestructive |
+| `applescript` | macOS automation via osascript | If safeMode or confirmDestructive |
 | `file_read` | Read files (1MB limit, home dir sandboxed) | No |
-| `file_write` | Write files (auto-creates parent dirs) | If confirmDestructive |
+| `file_write` | Write files (auto-creates parent dirs) | Hidden in safeMode, otherwise if confirmDestructive |
 | `frontmost_app_context` | Active app info via Accessibility API | No |
-| `capture_display` | Screen capture + OpenAI vision analysis | No |
+| `capture_display` | Downscaled JPEG screen capture + OpenAI vision analysis | No |
 | `reason_deeply` | Delegation to gpt-5-mini for complex reasoning | No |
 | `web_search` | Web search via OpenAI Responses API | No |
 
@@ -66,8 +67,8 @@ Deepgram Voice Agent API (server-side orchestration)
 
 **Settings**
 - API key management (Deepgram, OpenRouter, OpenAI) stored in Keychain
-- Voice selection (12 Deepgram Aura voices)
-- LLM model selection (any OpenRouter model)
+- Voice model selection (freeform Deepgram voice model)
+- LLM and STT model selection
 - Global hotkey configuration
 - Safe mode and destructive action confirmation toggles
 
@@ -101,7 +102,7 @@ DeepVoice/
         OpenAIClient.swift            # Shared OpenAI API caller and model constants
 
         # Audio
-        AudioManager.swift            # AVAudioEngine capture (24kHz PCM16) + playback
+        AudioManager.swift            # Separate capture and playback engines
 
         # Infrastructure
         Config.swift                  # DeepVoiceConfig (providers, model, voice)
@@ -124,6 +125,21 @@ swift run        # macOS only, needs mic + screen permissions
 ```
 
 Requires macOS 14+ with Xcode command line tools.
+
+## CI
+
+GitHub Actions can compile and test the package on hosted macOS runners, so you do not need your own Mac just to validate pushes or pull requests.
+
+Current workflow:
+- `.github/workflows/macos-ci.yml`
+- Runs on `macos-14`
+- Executes `swift build` and `swift test --parallel`
+
+Current test coverage focuses on non-UI runtime logic:
+- config decoding defaults
+- voice-agent settings payload generation
+- safe-mode tool registration behavior
+- `safe_bash` high-output truncation
 
 ## API Keys
 
@@ -153,8 +169,9 @@ Keychain: `com.thebrownproject.deepvoice` service.
 2. **BYO LLM via OpenRouter** -- `provider.type = "open_ai"` with custom `endpoint` pointing at OpenRouter's OpenAI-compatible API. Use any model.
 3. **Client-side function calling** -- all tools run locally on the Mac, results sent back through the WebSocket
 4. **Shell metacharacter blocking** -- safe_bash rejects `;|&\`$(){}\\!<>\n\r` before allowlist check to prevent injection
-5. **No Python backend** -- eliminates the local server, IPC protocol, and process management. One process, one WebSocket.
-6. **Dev console over floating widget** -- explicit visibility into agent state, logs, and tool calls during development
+5. **Warm session design** -- keep the Deepgram Voice Agent socket warm, then start/stop only local capture for lower first-response latency
+6. **No Python backend** -- eliminates the local server, IPC protocol, and process management. One process, one WebSocket.
+7. **Dev console over floating widget** -- explicit visibility into agent state, logs, and tool calls during development
 
 ## Background
 

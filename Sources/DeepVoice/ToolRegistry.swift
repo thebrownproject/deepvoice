@@ -74,10 +74,11 @@ final class ToolRegistry: @unchecked Sendable {
 // MARK: - Default tool registration
 
 extension ToolRegistry {
-    /// Register all 8 tool schemas. frontmost_app_context and capture_display use
-    /// placeholders here (overridden by DesktopTools.register); rest have real handlers.
-    static func withDefaultTools(confirmDestructive: Bool = false) -> ToolRegistry {
+    /// Register the default tool schemas. frontmost_app_context and capture_display use
+    /// placeholders here (overridden by DesktopTools.register). Safe mode hides file_write.
+    static func withDefaultTools(config: DeepVoiceConfig) -> ToolRegistry {
         let registry = ToolRegistry()
+        let guardedApproval = config.confirmDestructive || config.safeMode
 
         registry.register(
             name: "safe_bash",
@@ -89,7 +90,7 @@ extension ToolRegistry {
                 ]),
             ],
             required: ["command"],
-            needsApproval: confirmDestructive,
+            needsApproval: guardedApproval,
             handler: safeBashHandler
         )
 
@@ -103,7 +104,7 @@ extension ToolRegistry {
                 ]),
             ],
             required: ["script"],
-            needsApproval: confirmDestructive,
+            needsApproval: guardedApproval,
             handler: applescriptHandler
         )
 
@@ -120,23 +121,25 @@ extension ToolRegistry {
             handler: handleFileRead
         )
 
-        registry.register(
-            name: "file_write",
-            description: "Write content to a file, creating parent directories as needed.",
-            parameters: [
-                "path": .object([
-                    "type": .string("string"),
-                    "description": .string("Path to the file to write"),
-                ]),
-                "content": .object([
-                    "type": .string("string"),
-                    "description": .string("Content to write to the file"),
-                ]),
-            ],
-            required: ["path", "content"],
-            needsApproval: confirmDestructive,
-            handler: handleFileWrite
-        )
+        if !config.safeMode {
+            registry.register(
+                name: "file_write",
+                description: "Write content to a file, creating parent directories as needed.",
+                parameters: [
+                    "path": .object([
+                        "type": .string("string"),
+                        "description": .string("Path to the file to write"),
+                    ]),
+                    "content": .object([
+                        "type": .string("string"),
+                        "description": .string("Content to write to the file"),
+                    ]),
+                ],
+                required: ["path", "content"],
+                needsApproval: config.confirmDestructive,
+                handler: handleFileWrite
+            )
+        }
 
         registry.register(
             name: "frontmost_app_context",

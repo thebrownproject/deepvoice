@@ -10,7 +10,8 @@ protocol AppToolExecutor: AnyObject {
 enum DesktopContextToolError: LocalizedError {
     case missingFrontmostApplication
     case displayCaptureUnavailable
-    case pngEncodingFailed
+    case bitmapContextUnavailable
+    case jpegEncodingFailed
     case unsupportedTool(String)
 
     var errorDescription: String? {
@@ -19,13 +20,18 @@ enum DesktopContextToolError: LocalizedError {
             "No frontmost application was available."
         case .displayCaptureUnavailable:
             "Display capture was unavailable."
-        case .pngEncodingFailed:
-            "Failed to encode the display screenshot."
+        case .bitmapContextUnavailable:
+            "Failed to create the screenshot bitmap context."
+        case .jpegEncodingFailed:
+            "Failed to encode the display screenshot as JPEG."
         case .unsupportedTool(let tool):
             "Unsupported app tool: \(tool)"
         }
     }
 }
+
+private let maxCaptureDimension = 1440
+private let captureCompressionFactor: CGFloat = 0.55
 
 @MainActor
 final class DesktopContextToolExecutor: AppToolExecutor {
@@ -75,18 +81,74 @@ final class DesktopContextToolExecutor: AppToolExecutor {
             throw DesktopContextToolError.displayCaptureUnavailable
         }
 
-        let bitmap = NSBitmapImageRep(cgImage: image)
-        guard let pngData = bitmap.representation(using: .png, properties: [:]) else {
-            throw DesktopContextToolError.pngEncodingFailed
+        let originalWidth = image.width
+        let originalHeight = image.height
+        let targetSize = scaledSize(width: originalWidth, height: originalHeight)
+        guard let jpegData = jpegData(from: image, targetSize: targetSize) else {
+            throw DesktopContextToolError.jpegEncodingFailed
         }
 
         return [
             "display_id": Int(displayID),
-            "width": image.width,
-            "height": image.height,
-            "mime_type": "image/png",
-            "image_base64": pngData.base64EncodedString(),
+            "width": Int(targetSize.width),
+            "height": Int(targetSize.height),
+            "original_width": originalWidth,
+            "original_height": originalHeight,
+            "byte_count": jpegData.count,
+            "mime_type": "image/jpeg",
+            "image_base64": jpegData.base64EncodedString(),
         ]
+    }
+
+    private func scaledSize(width: Int, height: Int) -> NSSize {
+        let longestEdge = max(width, height)
+        guard longestEdge > maxCaptureDimension else {
+            return NSSize(width: width, height: height)
+        }
+
+        let scale = CGFloat(maxCaptureDimension) / CGFloat(longestEdge)
+        let scaledWidth = max(Int((CGFloat(width) * scale).rounded(.down)), 1)
+        let scaledHeight = max(Int((CGFloat(height) * scale).rounded(.down)), 1)
+        return NSSize(width: scaledWidth, height: scaledHeight)
+    }
+
+    private func jpegData(from image: CGImage, targetSize: NSSize) -> Data? {
+        guard let bitmap = NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: max(Int(targetSize.width), 1),
+            pixelsHigh: max(Int(targetSize.height), 1),
+            bitsPerSample: 8,
+            samplesPerPixel: 4,
+            hasAlpha: true,
+            isPlanar: false,
+            colorSpaceName: .deviceRGB,
+            bytesPerRow: 0,
+            bitsPerPixel: 0
+        ) else {
+            return nil
+        }
+
+        bitmap.size = targetSize
+
+        guard let context = NSGraphicsContext(bitmapImageRep: bitmap) else {
+            return nil
+        }
+
+        let sourceSize = NSSize(width: image.width, height: image.height)
+        let imageRect = NSRect(origin: .zero, size: sourceSize)
+        let targetRect = NSRect(origin: .zero, size: targetSize)
+        let nsImage = NSImage(cgImage: image, size: sourceSize)
+
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = context
+        context.imageInterpolation = .high
+        nsImage.draw(in: targetRect, from: imageRect, operation: .copy, fraction: 1.0)
+        NSGraphicsContext.restoreGraphicsState()
+
+        return bitmap.representation(
+            using: .jpeg,
+            properties: [.compressionFactor: captureCompressionFactor]
+        )
     }
 
     private func frontmostWindowTitle(for processID: pid_t) -> String? {

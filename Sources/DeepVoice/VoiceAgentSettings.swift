@@ -24,6 +24,9 @@ enum VoiceAgentSettingsBuilder {
                 openRouterKey: openRouterKey,
                 greeting: greeting
             ),
+            "flags": [
+                "history": false,
+            ],
         ]
         // Opt out of Deepgram model improvement program for privacy
         settings["mip_opt_out"] = true
@@ -56,7 +59,7 @@ enum VoiceAgentSettingsBuilder {
     ) -> [String: Any] {
         var agent: [String: Any] = [
             "language": "en",
-            "listen": listenSettings(),
+            "listen": listenSettings(config: config),
             "think": thinkSettings(
                 config: config,
                 toolRegistry: toolRegistry,
@@ -72,12 +75,16 @@ enum VoiceAgentSettingsBuilder {
 
     // MARK: - Listen (STT)
 
-    private static func listenSettings() -> [String: Any] {
-        [
-            "provider": [
-                "type": "deepgram",
-                "model": "nova-3",
-            ],
+    private static func listenSettings(config: DeepVoiceConfig) -> [String: Any] {
+        var provider: [String: Any] = [
+            "type": config.sttProvider,
+            "model": config.sttModel,
+        ]
+        if !config.sttModel.lowercased().hasPrefix("flux") {
+            provider["smart_format"] = true
+        }
+        return [
+            "provider": provider,
         ]
     }
 
@@ -101,10 +108,11 @@ enum VoiceAgentSettingsBuilder {
                 "headers": [
                     "Authorization": "Bearer \(openRouterKey)",
                     "HTTP-Referer": "https://github.com/thebrownproject/deepvoice",
-                    "X-Title": "DeepVoice",
+                    "X-OpenRouter-Title": "DeepVoice",
                 ],
             ] as [String: Any],
             "prompt": Prompts.system,
+            "context_length": 12000,
         ]
 
         let functions = toolFunctions(from: toolRegistry)
@@ -120,7 +128,7 @@ enum VoiceAgentSettingsBuilder {
     private static func speakSettings(config: DeepVoiceConfig) -> [String: Any] {
         [
             "provider": [
-                "type": "deepgram",
+                "type": config.ttsProvider,
                 "model": config.voice,
             ],
         ]

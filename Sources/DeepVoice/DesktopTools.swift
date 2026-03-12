@@ -54,7 +54,7 @@ private func handleCaptureDisplay(_ arguments: String, executor: DesktopContextT
         return errorJSON("capture_display", "missing image_base64 in capture payload")
     }
 
-    let mimeType = capture["mime_type"] as? String ?? "image/png"
+    let mimeType = capture["mime_type"] as? String ?? "image/jpeg"
 
     guard let apiKey = KeychainHelper.loadAPIKey(for: .openAIAPIKey) else {
         return errorJSON("capture_display", "OpenAI API key not configured")
@@ -70,7 +70,10 @@ private func handleCaptureDisplay(_ arguments: String, executor: DesktopContextT
                     ["type": "text", "text": prompt],
                     [
                         "type": "image_url",
-                        "image_url": ["url": "data:\(mimeType);base64,\(imageBase64)"],
+                        "image_url": [
+                            "url": "data:\(mimeType);base64,\(imageBase64)",
+                            "detail": "low",
+                        ],
                     ],
                 ],
             ] as [String: Any],
@@ -84,6 +87,9 @@ private func handleCaptureDisplay(_ arguments: String, executor: DesktopContextT
     ]
     if let w = capture["width"] { payload["width"] = w }
     if let h = capture["height"] { payload["height"] = h }
+    if let w = capture["original_width"] { payload["original_width"] = w }
+    if let h = capture["original_height"] { payload["original_height"] = h }
+    if let byteCount = capture["byte_count"] { payload["byte_count"] = byteCount }
     if let d = capture["display_id"] { payload["display_id"] = d }
 
     let data = try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])

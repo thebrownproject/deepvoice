@@ -6,7 +6,7 @@ private let log = Logger(subsystem: "com.thebrownproject.deepvoice", category: "
 
 enum AudioConstants {
     static let sampleRate: Double = 24000
-    static let captureBufferSize: AVAudioFrameCount = 1024
+    static let captureBufferSize: AVAudioFrameCount = 480
     static let channels: AVAudioChannelCount = 1
 
     static let pcm16Format: AVAudioFormat = AVAudioFormat(
@@ -23,14 +23,18 @@ final class AudioManager: ObservableObject {
     @Published private(set) var isPlaying = false
     @Published private(set) var permissionGranted = false
 
-    private var audioEngine: AVAudioEngine?
-    private var converter: AVAudioConverter?
-    private var mixerNode: AVAudioMixerNode?
+    var onPlaybackStarted: (@Sendable () -> Void)?
+
+    private var captureEngine: AVAudioEngine?
+    private var captureConverter: AVAudioConverter?
+    private var captureMixerNode: AVAudioMixerNode?
     private let audioQueue = DispatchQueue(label: "com.deepvoice.audio-capture")
     private var capturing = false
 
+    private var playbackEngine: AVAudioEngine?
     private var playerNode: AVAudioPlayerNode?
     private let playbackQueue = DispatchQueue(label: "com.deepvoice.audio-playback")
+    private var playbackSuppressed = false
     private var playbackEpoch: UInt64 = 0
     private var samplesScheduled: UInt64 = 0
     private var samplesPlayed: UInt64 = 0
@@ -54,13 +58,30 @@ final class AudioManager: ObservableObject {
         }
     }
 
-    func startCapture(onAudioData: @escaping @Sendable (Data) -> Void) {
+    func preparePlayback() {
+        playbackQueue.async { [weak self] in
+            guard let self else { return }
+            do {
+                try self.ensurePlayerReady()
+            } catch {
+                log.error("Playback prewarm failed: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    func startCapture(
+        onCaptureStarted: (@Sendable () -> Void)? = nil,
+        onAudioData: @escaping @Sendable (Data) -> Void
+    ) {
         guard !isCapturing else { return }
 
         audioQueue.async { [weak self] in
             guard let self else { return }
             do {
                 try self.setupAndStart(onChunk: onAudioData)
+                DispatchQueue.main.async {
+                    onCaptureStarted?()
+                }
             } catch {
                 log.error("Capture start failed: \(error.localizedDescription)")
                 DispatchQueue.main.async { self.isCapturing = false }
@@ -69,34 +90,58 @@ final class AudioManager: ObservableObject {
     }
 
     func stopCapture() {
+        audioQueue.async { [weak self] in
+            guard let self else { return }
+            self.capturing = false
+            self.teardownCapture()
+        }
+        isCapturing = false
+    }
+
+    func suppressPlayback() {
         playbackQueue.async { [weak self] in
             guard let self else { return }
+            self.playbackSuppressed = true
             self.playbackEpoch &+= 1
             self.samplesScheduled = 0
             self.samplesPlayed = 0
+            self.playerNode?.stop()
+            self.playerNode?.reset()
+            DispatchQueue.main.async { self.isPlaying = false }
+            log.debug("Playback suppressed (epoch \(self.playbackEpoch))")
         }
-        audioQueue.async { [weak self] in
-            guard let self else { return }
-            self.capturing = false
-            self.teardown()
-        }
-        isCapturing = false
-        isPlaying = false
     }
 
-    func stopInputCapture() {
-        audioQueue.async { [weak self] in
+    func resumePlayback() {
+        playbackQueue.async { [weak self] in
             guard let self else { return }
-            self.capturing = false
-            self.teardownInput()
+            self.playbackSuppressed = false
+            do {
+                try self.ensurePlayerReady()
+            } catch {
+                log.error("Playback resume failed: \(error.localizedDescription)")
+            }
         }
-        isCapturing = false
+    }
+
+    func stopPlayback() {
+        suppressPlayback()
+    }
+
+    func shutdown() {
+        stopCapture()
+        playbackQueue.async { [weak self] in
+            guard let self else { return }
+            self.teardownPlayback()
+        }
+        isPlaying = false
     }
 
     /// Safe to call from any thread -- all work is dispatched to playbackQueue.
     nonisolated func enqueueAudio(data: Data) {
         playbackQueue.async { [weak self] in
             guard let self else { return }
+            guard !self.playbackSuppressed else { return }
 
             do {
                 try self.ensurePlayerReady()
@@ -110,11 +155,14 @@ final class AudioManager: ObservableObject {
 
             let epoch = self.playbackEpoch
             let scheduled = UInt64(buffer.frameLength)
+            let wasIdle = self.samplesPlayed >= self.samplesScheduled
             self.samplesScheduled += scheduled
 
-            let wasIdle = self.samplesPlayed >= (self.samplesScheduled - scheduled)
             if wasIdle {
-                DispatchQueue.main.async { self.isPlaying = true }
+                DispatchQueue.main.async {
+                    self.isPlaying = true
+                    self.onPlaybackStarted?()
+                }
             }
 
             player.scheduleBuffer(buffer) { [weak self] in
@@ -126,44 +174,28 @@ final class AudioManager: ObservableObject {
                     }
                 }
             }
-        }
-    }
 
-    func stopPlayback() {
-        playbackQueue.async { [weak self] in
-            guard let self else { return }
-            self.playbackEpoch &+= 1
-            self.samplesScheduled = 0
-            self.samplesPlayed = 0
-            self.playerNode?.stop()
-            DispatchQueue.main.async { self.isPlaying = false }
-            log.debug("Playback stopped (epoch \(self.playbackEpoch))")
+            if !player.isPlaying {
+                player.play()
+            }
         }
     }
 
     private func ensurePlayerReady() throws {
         let engine: AVAudioEngine
-        if let existing = self.audioEngine {
+        if let existing = playbackEngine {
             engine = existing
         } else {
-            engine = AVAudioEngine()
-            self.audioEngine = engine
+            let created = AVAudioEngine()
+            playbackEngine = created
+            engine = created
         }
 
         if playerNode == nil {
-            let wasRunning = engine.isRunning
-            if wasRunning { engine.stop() }
-
             let player = AVAudioPlayerNode()
             engine.attach(player)
             engine.connect(player, to: engine.mainMixerNode, format: AudioConstants.pcm16Format)
-            self.playerNode = player
-
-            engine.prepare()
-            try engine.start()
-            player.play()
-            log.info("Playback player node attached and playing")
-            return
+            playerNode = player
         }
 
         if !engine.isRunning {
@@ -171,7 +203,7 @@ final class AudioManager: ObservableObject {
             try engine.start()
         }
 
-        if let player = playerNode, !player.isPlaying {
+        if let player = playerNode, !player.isPlaying, !playbackSuppressed {
             player.play()
         }
     }
@@ -195,14 +227,9 @@ final class AudioManager: ObservableObject {
     }
 
     private func setupAndStart(onChunk: @escaping @Sendable (Data) -> Void) throws {
-        teardownInput()
+        teardownCapture()
 
-        let engine: AVAudioEngine
-        if let existing = self.audioEngine {
-            engine = existing
-        } else {
-            engine = AVAudioEngine()
-        }
+        let engine = AVAudioEngine()
         let input = engine.inputNode
         let inputFormat = input.outputFormat(forBus: 0)
 
@@ -228,9 +255,6 @@ final class AudioManager: ObservableObject {
         } else {
             captureFormat = inputFormat
         }
-
-        let wasRunning = engine.isRunning
-        if wasRunning { engine.stop() }
 
         let mixer = AVAudioMixerNode()
         mixer.volume = 1.0
@@ -271,35 +295,37 @@ final class AudioManager: ObservableObject {
         engine.prepare()
         try engine.start()
 
-        if wasRunning, let player = self.playerNode, !player.isPlaying {
-            player.play()
-        }
-
-        self.audioEngine = engine
-        self.mixerNode = mixer
-        self.converter = audioConverter
-        self.capturing = true
+        captureEngine = engine
+        captureMixerNode = mixer
+        captureConverter = audioConverter
+        capturing = true
         DispatchQueue.main.async { self.isCapturing = true }
 
         log.info("Capture started: \(inputFormat.channelCount)ch \(Int(inputFormat.sampleRate))Hz -> 24kHz PCM16 mono")
     }
 
-    private func teardownInput() {
-        mixerNode?.removeTap(onBus: 0)
-        if let mixer = mixerNode, let engine = audioEngine {
+    private func teardownCapture() {
+        captureMixerNode?.removeTap(onBus: 0)
+        if let mixer = captureMixerNode, let engine = captureEngine {
             engine.disconnectNodeInput(mixer)
             engine.detach(mixer)
         }
-        mixerNode = nil
-        converter = nil
+        captureMixerNode = nil
+        captureConverter = nil
+        captureEngine?.stop()
+        captureEngine = nil
     }
 
-    private func teardown() {
-        teardownInput()
+    private func teardownPlayback() {
+        playbackSuppressed = true
+        playbackEpoch &+= 1
+        samplesScheduled = 0
+        samplesPlayed = 0
         playerNode?.stop()
+        playerNode?.reset()
+        playbackEngine?.stop()
         playerNode = nil
-        audioEngine?.stop()
-        audioEngine = nil
+        playbackEngine = nil
     }
 
     private func convert(

@@ -76,6 +76,29 @@ private final class OnceFlag: @unchecked Sendable {
     }
 }
 
+private final class OutputAccumulator: @unchecked Sendable {
+    private let lock = NSLock()
+    private var buffer = Data()
+    private var totalBytes = 0
+
+    func append(_ data: Data) {
+        guard !data.isEmpty else { return }
+        lock.withLock {
+            totalBytes += data.count
+            guard buffer.count < maxOutput else { return }
+            let remaining = maxOutput - buffer.count
+            buffer.append(data.prefix(remaining))
+        }
+    }
+
+    func renderedString() -> String {
+        let snapshot = lock.withLock { (buffer, totalBytes) }
+        let rendered = String(decoding: snapshot.0, as: UTF8.self)
+        guard snapshot.1 > snapshot.0.count else { return rendered }
+        return rendered + "\n... truncated (\(snapshot.1) bytes total)"
+    }
+}
+
 private func runProcess(
     executable: String,
     arguments: [String]
@@ -89,27 +112,57 @@ private func runProcess(
     process.standardOutput = stdoutPipe
     process.standardError = stderrPipe
 
+    let stdoutHandle = stdoutPipe.fileHandleForReading
+    let stderrHandle = stderrPipe.fileHandleForReading
+    let stdoutAccumulator = OutputAccumulator()
+    let stderrAccumulator = OutputAccumulator()
+
+    stdoutHandle.readabilityHandler = { handle in
+        let data = handle.availableData
+        if data.isEmpty {
+            handle.readabilityHandler = nil
+            return
+        }
+        stdoutAccumulator.append(data)
+    }
+
+    stderrHandle.readabilityHandler = { handle in
+        let data = handle.availableData
+        if data.isEmpty {
+            handle.readabilityHandler = nil
+            return
+        }
+        stderrAccumulator.append(data)
+    }
+
     try process.run()
 
     let result: String = try await withCheckedThrowingContinuation { continuation in
         let once = OnceFlag()
 
+        func cleanup() {
+            stdoutHandle.readabilityHandler = nil
+            stderrHandle.readabilityHandler = nil
+        }
+
         // Timeout: terminate process and resume with error
         DispatchQueue.global().asyncAfter(deadline: .now() + processTimeout) {
             if process.isRunning { process.terminate() }
             if once.claim() {
+                cleanup()
                 continuation.resume(throwing: ShellToolError.timeout)
             }
         }
 
         // Normal completion: read output and resume with result
         process.terminationHandler = { _ in
-            let out = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
-            let err = stderrPipe.fileHandleForReading.readDataToEndOfFile()
+            cleanup()
+            stdoutAccumulator.append(stdoutHandle.readDataToEndOfFile())
+            stderrAccumulator.append(stderrHandle.readDataToEndOfFile())
             guard once.claim() else { return }
 
-            let outStr = String(data: out, encoding: .utf8) ?? ""
-            let errStr = String(data: err, encoding: .utf8) ?? ""
+            let outStr = stdoutAccumulator.renderedString()
+            let errStr = stderrAccumulator.renderedString()
 
             if process.terminationStatus != 0 && !errStr.isEmpty {
                 let msg = errStr.trimmingCharacters(in: .whitespacesAndNewlines)
