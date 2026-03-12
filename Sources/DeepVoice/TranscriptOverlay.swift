@@ -1,5 +1,3 @@
-import AppKit
-import Combine
 import SwiftUI
 
 struct TranscriptEntry: Identifiable {
@@ -27,68 +25,28 @@ struct TranscriptEntry: Identifiable {
     }
 }
 
-@MainActor
-final class TranscriptStore: ObservableObject {
-    @Published private(set) var entries: [TranscriptEntry] = []
-    @Published var isVisible: Bool {
-        didSet { UserDefaults.standard.set(isVisible, forKey: Self.visibilityKey) }
-    }
-
-    static let visibilityKey = "transcriptVisible"
-    private static let maxEntries = 20
-    private var defaultsObserver: AnyCancellable?
-
-    init() {
-        isVisible = UserDefaults.standard.bool(forKey: Self.visibilityKey)
-        defaultsObserver = UserDefaults.standard
-            .publisher(for: \.transcriptVisible)
-            .receive(on: RunLoop.main)
-            .sink { [weak self] newValue in
-                guard let self, self.isVisible != newValue else { return }
-                self.isVisible = newValue
-            }
-    }
-
-    func handleTranscript(role: String, text: String, isFinal: Bool) {
-        TranscriptEntry.merge(into: &entries, role: role, text: text, isFinal: isFinal, maxEntries: Self.maxEntries)
-    }
-
-    func clear() {
-        entries.removeAll()
-    }
-}
-
-extension UserDefaults {
-    @objc dynamic var transcriptVisible: Bool {
-        bool(forKey: TranscriptStore.visibilityKey)
-    }
-}
-
 struct TranscriptOverlay: View {
-    @ObservedObject var store: TranscriptStore
+    var entries: [TranscriptEntry]
 
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 6) {
-                    ForEach(store.entries) { entry in
+                    ForEach(entries) { entry in
                         TranscriptBubble(entry: entry)
                             .id(entry.id)
                     }
                 }
                 .padding(10)
             }
-            .onChange(of: store.entries.count) { _, _ in
-                if let last = store.entries.last {
+            .onChange(of: entries.count) { _, _ in
+                if let last = entries.last {
                     withAnimation(.easeOut(duration: 0.15)) {
                         proxy.scrollTo(last.id, anchor: .bottom)
                     }
                 }
             }
         }
-        .frame(width: 260, height: 200)
-        .background(.ultraThinMaterial.opacity(0.85))
-        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 }
 
@@ -115,4 +73,3 @@ private struct TranscriptBubble: View {
             : AnyShapeStyle(Color(white: 0.5, opacity: 0.12))
     }
 }
-

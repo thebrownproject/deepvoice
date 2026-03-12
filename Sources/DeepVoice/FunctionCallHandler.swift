@@ -3,6 +3,7 @@ import os
 
 private let log = Logger(subsystem: "com.thebrownproject.deepvoice", category: "FunctionCallHandler")
 
+@MainActor
 protocol FunctionCallApprovalDelegate: AnyObject {
     func functionCallNeedsApproval(id: String, name: String, args: String) async -> Bool
 }

@@ -345,7 +345,7 @@ final class DeepgramAgentClient: NSObject, @unchecked Sendable {
         isConnected = false
         task?.cancel(with: .normalClosure, reason: nil)
         task = nil
-        session?.invalidateAndCancel()
+        session?.finishTasksAndInvalidate()
         session = nil
     }
 

@@ -22,7 +22,13 @@ struct DevConsoleView: View {
         VStack(spacing: 0) {
             statusBar
             Divider()
-            consoleLog
+            HSplitView {
+                consoleLog
+                if !state.transcriptEntries.isEmpty {
+                    TranscriptOverlay(entries: state.transcriptEntries)
+                        .frame(minWidth: 220, idealWidth: 260)
+                }
+            }
             Divider()
             if !state.pendingApprovals.isEmpty {
                 approvalSection

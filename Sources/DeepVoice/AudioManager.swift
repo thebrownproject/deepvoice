@@ -1,4 +1,4 @@
-import AVFoundation
+@preconcurrency import AVFoundation
 import AppKit
 import os
 
@@ -17,8 +17,13 @@ enum AudioConstants {
     )!
 }
 
-@MainActor
-final class AudioManager: ObservableObject {
+/// Audio capture and playback manager.
+///
+/// Uses `@unchecked Sendable` with manual queue synchronization instead of
+/// `@MainActor`, because audio capture taps and playback completion handlers
+/// fire on background threads. Published state is forwarded to MainActor
+/// via `DispatchQueue.main.async`.
+final class AudioManager: ObservableObject, @unchecked Sendable {
     @Published private(set) var isCapturing = false
     @Published private(set) var isPlaying = false
     @Published private(set) var permissionGranted = false
@@ -35,6 +40,7 @@ final class AudioManager: ObservableObject {
     private var samplesScheduled: UInt64 = 0
     private var samplesPlayed: UInt64 = 0
 
+    @MainActor
     func requestPermission() async -> Bool {
         let status = AVCaptureDevice.authorizationStatus(for: .audio)
         switch status {
@@ -55,8 +61,6 @@ final class AudioManager: ObservableObject {
     }
 
     func startCapture(onAudioData: @escaping @Sendable (Data) -> Void) {
-        guard !isCapturing else { return }
-
         audioQueue.async { [weak self] in
             guard let self else { return }
             do {
@@ -80,8 +84,10 @@ final class AudioManager: ObservableObject {
             self.capturing = false
             self.teardown()
         }
-        isCapturing = false
-        isPlaying = false
+        DispatchQueue.main.async { [weak self] in
+            self?.isCapturing = false
+            self?.isPlaying = false
+        }
     }
 
     func stopInputCapture() {
@@ -90,11 +96,13 @@ final class AudioManager: ObservableObject {
             self.capturing = false
             self.teardownInput()
         }
-        isCapturing = false
+        DispatchQueue.main.async { [weak self] in
+            self?.isCapturing = false
+        }
     }
 
     /// Safe to call from any thread -- all work is dispatched to playbackQueue.
-    nonisolated func enqueueAudio(data: Data) {
+    func enqueueAudio(data: Data) {
         playbackQueue.async { [weak self] in
             guard let self else { return }
 
@@ -140,6 +148,8 @@ final class AudioManager: ObservableObject {
             log.debug("Playback stopped (epoch \(self.playbackEpoch))")
         }
     }
+
+    // MARK: - Playback internals (called on playbackQueue)
 
     private func ensurePlayerReady() throws {
         let engine: AVAudioEngine
@@ -193,6 +203,8 @@ final class AudioManager: ObservableObject {
         }
         return buffer
     }
+
+    // MARK: - Capture internals (called on audioQueue)
 
     private func setupAndStart(onChunk: @escaping @Sendable (Data) -> Void) throws {
         teardownInput()
@@ -308,11 +320,10 @@ final class AudioManager: ObservableObject {
         to targetFormat: AVAudioFormat
     ) -> AVAudioPCMBuffer? {
         let ratio = Float(targetFormat.sampleRate) / Float(buffer.format.sampleRate)
-        let frameCount = AVAudioFrameCount(Float(buffer.frameLength) * ratio)
+        let frameCount = AVAudioFrameCount(Float(buffer.frameLength) * ratio) + 1
         guard let output = AVAudioPCMBuffer(pcmFormat: targetFormat, frameCapacity: frameCount) else {
             return nil
         }
-        output.frameLength = frameCount
 
         var consumed = false
         var error: NSError?

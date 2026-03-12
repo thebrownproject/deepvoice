@@ -6,6 +6,7 @@ extension KeyboardShortcuts.Name {
     static let openSettings = Self("openSettings", default: .init(.s, modifiers: [.option, .shift]))
 }
 
+@MainActor
 protocol HotkeyManagerDelegate: AnyObject {
     func hotkeyManagerDidDetectKeyDown(_ manager: HotkeyManager)
     func hotkeyManagerDidDetectKeyUp(_ manager: HotkeyManager)

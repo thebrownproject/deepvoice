@@ -1,6 +1,9 @@
 import Foundation
+import os
 
-struct DeepVoiceConfig: Codable {
+private let log = Logger(subsystem: "com.thebrownproject.deepvoice", category: "Config")
+
+struct DeepVoiceConfig: Codable, Equatable {
     var sttProvider: String
     var ttsProvider: String
     var llmProvider: String
@@ -69,3 +72,49 @@ struct DeepVoiceConfig: Codable {
         try data.write(to: DeepVoiceConfig.configPath)
     }
 }
+
+// MARK: - Observable config store shared between Settings UI and AppDelegate
+
+@Observable @MainActor
+final class ConfigStore {
+    var config: DeepVoiceConfig {
+        didSet {
+            guard config != oldValue else { return }
+            scheduleSave()
+        }
+    }
+
+    /// Cached API keys -- reloaded on demand via `reloadAPIKeys()`.
+    private(set) var deepgramAPIKey: String?
+    private(set) var openRouterAPIKey: String?
+    private(set) var openAIAPIKey: String?
+
+    private var saveTask: Task<Void, Never>?
+
+    init() {
+        config = (try? DeepVoiceConfig.load()) ?? .defaults
+        reloadAPIKeys()
+    }
+
+    func reloadAPIKeys() {
+        deepgramAPIKey = KeychainHelper.loadAPIKey(for: .deepgramAPIKey)
+        openRouterAPIKey = KeychainHelper.loadAPIKey(for: .openRouterAPIKey)
+        openAIAPIKey = KeychainHelper.loadAPIKey(for: .openAIAPIKey)
+    }
+
+    /// Debounce config saves so typing in text fields doesn't write to disk per keystroke.
+    private func scheduleSave() {
+        saveTask?.cancel()
+        saveTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 500_000_000) // 0.5s debounce
+            guard !Task.isCancelled, let self else { return }
+            do {
+                try self.config.save()
+                log.info("Config saved")
+            } catch {
+                log.error("Config save failed: \(error.localizedDescription)")
+            }
+        }
+    }
+}
+

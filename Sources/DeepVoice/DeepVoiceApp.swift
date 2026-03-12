@@ -8,9 +8,11 @@ struct DeepVoiceApp: App {
     var body: some Scene {
         WindowGroup("DeepVoice Console") {
             DevConsoleView(state: appDelegate.consoleState, actions: appDelegate.consoleActions)
+                .environment(appDelegate.configStore)
         }
         Settings {
             SettingsView()
+                .environment(appDelegate.configStore)
         }
     }
 }
@@ -18,15 +20,13 @@ struct DeepVoiceApp: App {
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let consoleState = DevConsoleState()
+    let configStore = ConfigStore()
     let hotkeyManager = HotkeyManager()
     let audioManager = AudioManager()
     let agentClient = DeepgramAgentClient()
     let desktopContextToolExecutor = DesktopContextToolExecutor()
     private(set) var toolRegistry: ToolRegistry?
     private(set) var functionCallHandler: FunctionCallHandler?
-    private var config: DeepVoiceConfig = .defaults
-    private var deepgramAPIKey: String?
-    private var openRouterAPIKey: String?
 
     private var pendingContinuations: [String: CheckedContinuation<Bool, Never>] = [:]
     private var alwaysApprovedTools: Set<String> = []
@@ -52,10 +52,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         DeepVoiceConfig.bootstrapStorage()
 
-        if let loaded = try? DeepVoiceConfig.load() {
-            config = loaded
-            consoleState.log("Config loaded (llm: \(config.llmProvider)/\(config.llmModel))")
-        }
+        consoleState.log("Config loaded (llm: \(configStore.config.llmProvider)/\(configStore.config.llmModel))")
 
         for account in KeychainAccount.allCases {
             if KeychainHelper.loadAPIKey(for: account) != nil {
@@ -65,12 +62,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
-        deepgramAPIKey = KeychainHelper.loadAPIKey(for: .deepgramAPIKey)
-        openRouterAPIKey = KeychainHelper.loadAPIKey(for: .openRouterAPIKey)
-
-        let registry = ToolRegistry.withDefaultTools(confirmDestructive: config.confirmDestructive)
+        let registry = ToolRegistry.withDefaultTools()
+        registry.setConfigStore(configStore)
         DesktopTools.register(on: registry, executor: desktopContextToolExecutor)
         toolRegistry = registry
+
+        // Keep registry in sync with live config changes
+        observeConfigChanges(registry: registry)
 
         let handler = FunctionCallHandler(
             toolRegistry: registry,
@@ -105,7 +103,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func startSession() {
-        guard let deepgramKey = deepgramAPIKey else {
+        // Reload keys in case they were changed in Settings
+        configStore.reloadAPIKeys()
+
+        guard let deepgramKey = configStore.deepgramAPIKey else {
             consoleState.log("Cannot start -- Deepgram API key not set", level: .error)
             return
         }
@@ -134,6 +135,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         consoleState.appState = newState
     }
 
+    private func observeConfigChanges(registry: ToolRegistry) {
+        // Use withObservationTracking to re-sync when confirmDestructive or safeMode changes
+        func observe() {
+            withObservationTracking {
+                _ = configStore.config.confirmDestructive
+                _ = configStore.config.safeMode
+            } onChange: {
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    registry.updateConfirmDestructive(self.configStore.config.confirmDestructive)
+                    registry.updateSafeMode(self.configStore.config.safeMode)
+                    observe() // re-register for next change
+                }
+            }
+        }
+        observe()
+    }
+
     private func resolveApproval(callId: String, approved: Bool, always: Bool) {
         guard let continuation = pendingContinuations.removeValue(forKey: callId) else { return }
         if approved, always, let approval = consoleState.pendingApprovals.first(where: { $0.id == callId }) {
@@ -148,12 +167,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 // MARK: - FunctionCallApprovalDelegate
 
 extension AppDelegate: FunctionCallApprovalDelegate {
-    nonisolated func functionCallNeedsApproval(id: String, name: String, args: String) async -> Bool {
-        await _requestApproval(id: id, name: name, args: args)
-    }
-
-    /// MainActor-isolated helper so we can safely access state and continuations.
-    private func _requestApproval(id: String, name: String, args: String) async -> Bool {
+    func functionCallNeedsApproval(id: String, name: String, args: String) async -> Bool {
         if alwaysApprovedTools.contains(name) {
             consoleState.log("Auto-approved \(name)")
             return true
@@ -197,13 +211,13 @@ extension AppDelegate: DeepgramAgentDelegate {
             self.consoleState.connectionState = .connected
             self.consoleState.log("Voice Agent connected (request: \(requestId))")
 
-            guard let orKey = self.openRouterAPIKey, let registry = self.toolRegistry else {
+            guard let orKey = self.configStore.openRouterAPIKey, let registry = self.toolRegistry else {
                 self.consoleState.log("Missing OpenRouter key or tool registry", level: .error)
                 return
             }
 
             let settings = VoiceAgentSettingsBuilder.build(
-                config: self.config,
+                config: self.configStore.config,
                 toolRegistry: registry,
                 openRouterKey: orKey,
                 greeting: "Hey there!"
@@ -269,11 +283,12 @@ extension AppDelegate: DeepgramAgentDelegate {
     }
 
     nonisolated func agentAudioDone() {
+        // Don't transition to listening here -- audio buffers may still be playing.
+        // The AudioManager playback completion handler updates isPlaying, and
+        // the next UserStartedSpeaking or AgentThinking event will drive state.
         Task { @MainActor [weak self] in
             guard let self else { return }
-            if self.consoleState.appState == .speaking {
-                self.setState(.listening)
-            }
+            self.consoleState.log("Agent audio stream complete", level: .debug)
         }
     }
 

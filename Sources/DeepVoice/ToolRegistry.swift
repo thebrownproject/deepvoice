@@ -8,19 +8,40 @@ typealias ToolHandler = (String) async throws -> String
 final class ToolRegistry: @unchecked Sendable {
     private struct Registration {
         let definition: ToolDefinition
-        let needsApproval: Bool
+        let isDestructive: Bool
         let handler: ToolHandler
     }
 
     private let lock = NSLock()
     private var tools: [String: Registration] = [:]
 
+    /// When true, destructive tools require user approval. Updated from ConfigStore.
+    private var _confirmDestructive: Bool = true
+    /// When true, destructive tools are blocked entirely.
+    private var _safeMode: Bool = true
+
+    @MainActor
+    func setConfigStore(_ store: ConfigStore) {
+        lock.withLock {
+            _confirmDestructive = store.config.confirmDestructive
+            _safeMode = store.config.safeMode
+        }
+    }
+
+    func updateConfirmDestructive(_ value: Bool) {
+        lock.withLock { _confirmDestructive = value }
+    }
+
+    func updateSafeMode(_ value: Bool) {
+        lock.withLock { _safeMode = value }
+    }
+
     func register(
         name: String,
         description: String,
         parameters: [String: JSONValue],
         required: [String],
-        needsApproval: Bool = false,
+        isDestructive: Bool = false,
         handler: @escaping ToolHandler
     ) {
         let schema: JSONValue = .object([
@@ -37,7 +58,7 @@ final class ToolRegistry: @unchecked Sendable {
             )
         )
         lock.withLock {
-            tools[name] = Registration(definition: def, needsApproval: needsApproval, handler: handler)
+            tools[name] = Registration(definition: def, isDestructive: isDestructive, handler: handler)
         }
         log.info("Registered tool: \(name)")
     }
@@ -47,10 +68,17 @@ final class ToolRegistry: @unchecked Sendable {
     }
 
     func execute(toolCall: ToolCall) async throws -> String {
-        let registration = lock.withLock { tools[toolCall.function.name] }
+        let (registration, safeMode) = lock.withLock {
+            (tools[toolCall.function.name], _safeMode)
+        }
         guard let registration else {
             let msg = "Unknown tool: \(toolCall.function.name)"
             log.error("\(msg)")
+            return "Error: \(msg)"
+        }
+        if safeMode && registration.isDestructive {
+            let msg = "Safe mode is on -- \(toolCall.function.name) is blocked"
+            log.info("\(msg)")
             return "Error: \(msg)"
         }
         do {
@@ -62,8 +90,13 @@ final class ToolRegistry: @unchecked Sendable {
         }
     }
 
+    /// Check if a tool needs user approval. Destructive tools require approval
+    /// only when `confirmDestructive` is enabled in the live config.
     func needsApproval(_ name: String) -> Bool {
-        lock.withLock { tools[name]?.needsApproval ?? false }
+        lock.withLock {
+            guard let reg = tools[name], reg.isDestructive else { return false }
+            return _confirmDestructive
+        }
     }
 
     func registeredToolNames() -> [String] {
@@ -76,7 +109,7 @@ final class ToolRegistry: @unchecked Sendable {
 extension ToolRegistry {
     /// Register all 8 tool schemas. frontmost_app_context and capture_display use
     /// placeholders here (overridden by DesktopTools.register); rest have real handlers.
-    static func withDefaultTools(confirmDestructive: Bool = false) -> ToolRegistry {
+    static func withDefaultTools() -> ToolRegistry {
         let registry = ToolRegistry()
 
         registry.register(
@@ -89,7 +122,7 @@ extension ToolRegistry {
                 ]),
             ],
             required: ["command"],
-            needsApproval: confirmDestructive,
+            isDestructive: true,
             handler: safeBashHandler
         )
 
@@ -103,7 +136,7 @@ extension ToolRegistry {
                 ]),
             ],
             required: ["script"],
-            needsApproval: confirmDestructive,
+            isDestructive: true,
             handler: applescriptHandler
         )
 
@@ -134,7 +167,7 @@ extension ToolRegistry {
                 ]),
             ],
             required: ["path", "content"],
-            needsApproval: confirmDestructive,
+            isDestructive: true,
             handler: handleFileWrite
         )
 
