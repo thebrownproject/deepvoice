@@ -13,10 +13,8 @@ enum ConnectionState: String {
 final class DevConsoleState {
     var appState: AppState = .idle
     var connectionState: ConnectionState = .disconnected
-    weak var audioManager: AudioManager?
-
-    var isCapturing: Bool { audioManager?.isCapturing ?? false }
-    var isPlaying: Bool { audioManager?.isPlaying ?? false }
+    var isCapturing = false
+    var isPlaying = false
 
     var logEntries: [ConsoleLogEntry] = []
     var transcriptEntries: [TranscriptEntry] = []

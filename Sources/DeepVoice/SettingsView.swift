@@ -2,24 +2,30 @@ import SwiftUI
 import KeyboardShortcuts
 
 enum DeepgramVoice: String, CaseIterable, Identifiable {
+    // Aura-2 (recommended)
+    case aura2LunaEn = "aura-2-luna-en"
+    case aura2CoraEn = "aura-2-cora-en"
+    case aura2HelenaEn = "aura-2-helena-en"
+    case aura2CordeliaEn = "aura-2-cordelia-en"
+    case aura2AsteriaEn = "aura-2-asteria-en"
+    case aura2AndromedaEn = "aura-2-andromeda-en"
+    case aura2ThaliaEn = "aura-2-thalia-en"
+    case aura2AthenaEn = "aura-2-athena-en"
+    case aura2OrionEn = "aura-2-orion-en"
+    case aura2OrpheusEn = "aura-2-orpheus-en"
+    case aura2ApolloEn = "aura-2-apollo-en"
+    case aura2ZeusEn = "aura-2-zeus-en"
+    // Aura-1 (legacy)
     case auraAsteriaEn = "aura-asteria-en"
     case auraLunaEn = "aura-luna-en"
-    case auraStellaEn = "aura-stella-en"
-    case auraAthenaEn = "aura-athena-en"
-    case auraHeraEn = "aura-hera-en"
     case auraOrionEn = "aura-orion-en"
-    case auraArcasEn = "aura-arcas-en"
-    case auraPerseusEn = "aura-perseus-en"
-    case auraAngusEn = "aura-angus-en"
-    case auraOrpheusEn = "aura-orpheus-en"
-    case auraHeliosEn = "aura-helios-en"
-    case auraZeusEn = "aura-zeus-en"
 
     var id: String { rawValue }
 
     var displayName: String {
         rawValue
-            .replacingOccurrences(of: "aura-", with: "")
+            .replacingOccurrences(of: "aura-2-", with: "v2 ")
+            .replacingOccurrences(of: "aura-", with: "v1 ")
             .replacingOccurrences(of: "-en", with: "")
             .capitalized
     }

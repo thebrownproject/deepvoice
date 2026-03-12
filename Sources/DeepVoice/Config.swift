@@ -26,8 +26,8 @@ struct DeepVoiceConfig: Codable, Equatable {
         sttProvider: "deepgram",
         ttsProvider: "deepgram",
         llmProvider: "openrouter",
-        llmModel: "anthropic/claude-sonnet-4",
-        voice: "aura-asteria-en",
+        llmModel: "minimax/minimax-m2.5",
+        voice: "aura-2-luna-en",
         safeMode: true,
         confirmDestructive: true
     )

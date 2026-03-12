@@ -42,7 +42,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         hotkeyManager.delegate = self
         agentClient.delegate = self
-        consoleState.audioManager = audioManager
+
+        audioManager.onStateChange = { [weak self] capturing, playing in
+            self?.consoleState.isCapturing = capturing
+            self?.consoleState.isPlaying = playing
+        }
 
         Task {
             let granted = await audioManager.requestPermission()

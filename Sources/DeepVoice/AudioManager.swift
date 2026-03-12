@@ -1,5 +1,6 @@
 @preconcurrency import AVFoundation
 import AppKit
+import CoreAudio
 import os
 
 private let log = Logger(subsystem: "com.thebrownproject.deepvoice", category: "AudioManager")
@@ -23,10 +24,25 @@ enum AudioConstants {
 /// `@MainActor`, because audio capture taps and playback completion handlers
 /// fire on background threads. Published state is forwarded to MainActor
 /// via `DispatchQueue.main.async`.
-final class AudioManager: ObservableObject, @unchecked Sendable {
-    @Published private(set) var isCapturing = false
-    @Published private(set) var isPlaying = false
-    @Published private(set) var permissionGranted = false
+final class AudioManager: @unchecked Sendable {
+    /// Called on main thread whenever capture/playback state changes.
+    var onStateChange: ((_ isCapturing: Bool, _ isPlaying: Bool) -> Void)?
+
+    private(set) var isCapturing = false {
+        didSet { notifyState() }
+    }
+    private(set) var isPlaying = false {
+        didSet { notifyState() }
+    }
+    private(set) var permissionGranted = false
+
+    private func notifyState() {
+        let capturing = isCapturing
+        let playing = isPlaying
+        DispatchQueue.main.async { [weak self] in
+            self?.onStateChange?(capturing, playing)
+        }
+    }
 
     private var audioEngine: AVAudioEngine?
     private var converter: AVAudioConverter?
@@ -35,6 +51,8 @@ final class AudioManager: ObservableObject, @unchecked Sendable {
     private var capturing = false
 
     private var playerNode: AVAudioPlayerNode?
+    private var playbackFormat: AVAudioFormat?
+    private var playbackConverter: AVAudioConverter?
     private let playbackQueue = DispatchQueue(label: "com.deepvoice.audio-playback")
     private var playbackEpoch: UInt64 = 0
     private var samplesScheduled: UInt64 = 0
@@ -67,26 +85,28 @@ final class AudioManager: ObservableObject, @unchecked Sendable {
                 try self.setupAndStart(onChunk: onAudioData)
             } catch {
                 log.error("Capture start failed: \(error.localizedDescription)")
-                DispatchQueue.main.async { self.isCapturing = false }
+                self.isCapturing = false
             }
         }
     }
 
     func stopCapture() {
-        playbackQueue.async { [weak self] in
+        playbackQueue.sync { [weak self] in
             guard let self else { return }
             self.playbackEpoch &+= 1
             self.samplesScheduled = 0
             self.samplesPlayed = 0
+            self.playerNode?.stop()
+            self.playerNode = nil
+            self.playbackFormat = nil
+            self.playbackConverter = nil
         }
         audioQueue.async { [weak self] in
             guard let self else { return }
             self.capturing = false
+            self.isCapturing = false
+            self.isPlaying = false
             self.teardown()
-        }
-        DispatchQueue.main.async { [weak self] in
-            self?.isCapturing = false
-            self?.isPlaying = false
         }
     }
 
@@ -94,10 +114,8 @@ final class AudioManager: ObservableObject, @unchecked Sendable {
         audioQueue.async { [weak self] in
             guard let self else { return }
             self.capturing = false
+            self.isCapturing = false
             self.teardownInput()
-        }
-        DispatchQueue.main.async { [weak self] in
-            self?.isCapturing = false
         }
     }
 
@@ -114,7 +132,16 @@ final class AudioManager: ObservableObject, @unchecked Sendable {
             }
 
             guard let player = self.playerNode,
-                  let buffer = self.pcm16DataToBuffer(data) else { return }
+                  let srcBuffer = self.pcm16DataToBuffer(data) else { return }
+
+            // Convert from 24kHz PCM16 to native output format
+            let buffer: AVAudioPCMBuffer
+            if let conv = self.playbackConverter, let fmt = self.playbackFormat {
+                guard let converted = self.convertPlayback(buffer: srcBuffer, using: conv, to: fmt) else { return }
+                buffer = converted
+            } else {
+                buffer = srcBuffer
+            }
 
             let epoch = self.playbackEpoch
             let scheduled = UInt64(buffer.frameLength)
@@ -122,7 +149,7 @@ final class AudioManager: ObservableObject, @unchecked Sendable {
 
             let wasIdle = self.samplesPlayed >= (self.samplesScheduled - scheduled)
             if wasIdle {
-                DispatchQueue.main.async { self.isPlaying = true }
+                self.isPlaying = true
             }
 
             player.scheduleBuffer(buffer) { [weak self] in
@@ -130,7 +157,7 @@ final class AudioManager: ObservableObject, @unchecked Sendable {
                     guard let self, self.playbackEpoch == epoch else { return }
                     self.samplesPlayed += scheduled
                     if self.samplesPlayed >= self.samplesScheduled {
-                        DispatchQueue.main.async { self.isPlaying = false }
+                        self.isPlaying = false
                     }
                 }
             }
@@ -144,7 +171,7 @@ final class AudioManager: ObservableObject, @unchecked Sendable {
             self.samplesScheduled = 0
             self.samplesPlayed = 0
             self.playerNode?.stop()
-            DispatchQueue.main.async { self.isPlaying = false }
+            self.isPlaying = false
             log.debug("Playback stopped (epoch \(self.playbackEpoch))")
         }
     }
@@ -160,19 +187,38 @@ final class AudioManager: ObservableObject, @unchecked Sendable {
             self.audioEngine = engine
         }
 
+        // If the player was detached (e.g. by teardown on audioQueue), discard it
+        if let existing = playerNode, !engine.attachedNodes.contains(existing) {
+            playerNode = nil
+            playbackFormat = nil
+            playbackConverter = nil
+        }
+
         if playerNode == nil {
             let wasRunning = engine.isRunning
             if wasRunning { engine.stop() }
 
+            // Connect at the engine's native output format (e.g. 48kHz float32)
+            // to avoid forcing the entire system to 24kHz
+            let outputFormat = engine.mainMixerNode.outputFormat(forBus: 0)
+            let targetFormat = AVAudioFormat(
+                commonFormat: .pcmFormatFloat32,
+                sampleRate: outputFormat.sampleRate,
+                channels: 1,
+                interleaved: false
+            )!
+
             let player = AVAudioPlayerNode()
             engine.attach(player)
-            engine.connect(player, to: engine.mainMixerNode, format: AudioConstants.pcm16Format)
+            engine.connect(player, to: engine.mainMixerNode, format: targetFormat)
             self.playerNode = player
+            self.playbackFormat = targetFormat
+            self.playbackConverter = AVAudioConverter(from: AudioConstants.pcm16Format, to: targetFormat)
 
             engine.prepare()
             try engine.start()
             player.play()
-            log.info("Playback player node attached and playing")
+            log.info("Playback: \(Int(targetFormat.sampleRate))Hz float32 -> output")
             return
         }
 
@@ -184,6 +230,36 @@ final class AudioManager: ObservableObject, @unchecked Sendable {
         if let player = playerNode, !player.isPlaying {
             player.play()
         }
+    }
+
+    private func convertPlayback(
+        buffer: AVAudioPCMBuffer,
+        using converter: AVAudioConverter,
+        to targetFormat: AVAudioFormat
+    ) -> AVAudioPCMBuffer? {
+        let ratio = targetFormat.sampleRate / AudioConstants.sampleRate
+        let frameCount = AVAudioFrameCount(Double(buffer.frameLength) * ratio) + 1
+        guard let output = AVAudioPCMBuffer(pcmFormat: targetFormat, frameCapacity: frameCount) else {
+            return nil
+        }
+
+        var consumed = false
+        var error: NSError?
+        converter.convert(to: output, error: &error) { _, outStatus in
+            if consumed {
+                outStatus.pointee = .noDataNow
+                return nil
+            }
+            consumed = true
+            outStatus.pointee = .haveData
+            return buffer
+        }
+
+        if let error {
+            log.error("Playback conversion failed: \(error.localizedDescription)")
+            return nil
+        }
+        return output
     }
 
     private func pcm16DataToBuffer(_ data: Data) -> AVAudioPCMBuffer? {
@@ -204,6 +280,80 @@ final class AudioManager: ObservableObject, @unchecked Sendable {
         return buffer
     }
 
+    // MARK: - Input device selection
+
+    /// Find the built-in microphone device ID to avoid triggering Bluetooth HFP mode
+    /// (which degrades all system audio to phone quality when AirPods mic is used).
+    private func findBuiltInMicDeviceID() -> AudioDeviceID? {
+        var propertyAddress = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDevices,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+
+        var dataSize: UInt32 = 0
+        guard AudioObjectGetPropertyDataSize(AudioObjectID(kAudioObjectSystemObject), &propertyAddress, 0, nil, &dataSize) == noErr else { return nil }
+
+        let count = Int(dataSize) / MemoryLayout<AudioDeviceID>.size
+        var devices = [AudioDeviceID](repeating: 0, count: count)
+        guard AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &propertyAddress, 0, nil, &dataSize, &devices) == noErr else { return nil }
+
+        for device in devices {
+            // Check if it has input channels
+            var inputAddress = AudioObjectPropertyAddress(
+                mSelector: kAudioDevicePropertyStreamConfiguration,
+                mScope: kAudioDevicePropertyScopeInput,
+                mElement: kAudioObjectPropertyElementMain
+            )
+            var inputSize: UInt32 = 0
+            guard AudioObjectGetPropertyDataSize(device, &inputAddress, 0, nil, &inputSize) == noErr, inputSize > 0 else { continue }
+
+            let bufferListPtr = UnsafeMutablePointer<AudioBufferList>.allocate(capacity: 1)
+            defer { bufferListPtr.deallocate() }
+            guard AudioObjectGetPropertyData(device, &inputAddress, 0, nil, &inputSize, bufferListPtr) == noErr else { continue }
+
+            let bufferList = UnsafeMutableAudioBufferListPointer(bufferListPtr)
+            let inputChannels = bufferList.reduce(0) { $0 + Int($1.mNumberChannels) }
+            guard inputChannels > 0 else { continue }
+
+            // Check transport type - built-in devices have kAudioDeviceTransportTypeBuiltIn
+            var transportAddress = AudioObjectPropertyAddress(
+                mSelector: kAudioDevicePropertyTransportType,
+                mScope: kAudioObjectPropertyScopeGlobal,
+                mElement: kAudioObjectPropertyElementMain
+            )
+            var transportType: UInt32 = 0
+            var transportSize = UInt32(MemoryLayout<UInt32>.size)
+            guard AudioObjectGetPropertyData(device, &transportAddress, 0, nil, &transportSize, &transportType) == noErr else { continue }
+
+            if transportType == kAudioDeviceTransportTypeBuiltIn {
+                log.info("Found built-in mic: device ID \(device)")
+                return device
+            }
+        }
+        return nil
+    }
+
+    private func setInputDevice(_ deviceID: AudioDeviceID, on engine: AVAudioEngine) {
+        let inputNode = engine.inputNode
+        let audioUnit = inputNode.audioUnit!
+
+        var deviceID = deviceID
+        let status = AudioUnitSetProperty(
+            audioUnit,
+            kAudioOutputUnitProperty_CurrentDevice,
+            kAudioUnitScope_Global,
+            0,
+            &deviceID,
+            UInt32(MemoryLayout<AudioDeviceID>.size)
+        )
+        if status == noErr {
+            log.info("Set input device to built-in mic (ID: \(deviceID))")
+        } else {
+            log.warning("Failed to set input device: OSStatus \(status)")
+        }
+    }
+
     // MARK: - Capture internals (called on audioQueue)
 
     private func setupAndStart(onChunk: @escaping @Sendable (Data) -> Void) throws {
@@ -215,6 +365,12 @@ final class AudioManager: ObservableObject, @unchecked Sendable {
         } else {
             engine = AVAudioEngine()
         }
+
+        // Use built-in mic to prevent Bluetooth switching to HFP (phone quality)
+        if let builtInMic = findBuiltInMicDeviceID() {
+            setInputDevice(builtInMic, on: engine)
+        }
+
         let input = engine.inputNode
         let inputFormat = input.outputFormat(forBus: 0)
 
@@ -291,7 +447,7 @@ final class AudioManager: ObservableObject, @unchecked Sendable {
         self.mixerNode = mixer
         self.converter = audioConverter
         self.capturing = true
-        DispatchQueue.main.async { self.isCapturing = true }
+        self.isCapturing = true
 
         log.info("Capture started: \(inputFormat.channelCount)ch \(Int(inputFormat.sampleRate))Hz -> 24kHz PCM16 mono")
     }
