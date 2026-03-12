@@ -28,7 +28,7 @@ struct DeepVoiceConfig: Codable, Equatable {
         llmProvider: "openrouter",
         llmModel: "minimax/minimax-m2.5",
         voice: "aura-2-luna-en",
-        safeMode: true,
+        safeMode: false,
         confirmDestructive: true
     )
 

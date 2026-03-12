@@ -44,12 +44,15 @@ final class AudioManager: @unchecked Sendable {
         }
     }
 
-    private var audioEngine: AVAudioEngine?
+    // Separate engines so capture (built-in mic) doesn't force
+    // Bluetooth into HFP mode and degrade output quality.
+    private var captureEngine: AVAudioEngine?
     private var converter: AVAudioConverter?
     private var mixerNode: AVAudioMixerNode?
     private let audioQueue = DispatchQueue(label: "com.deepvoice.audio-capture")
     private var capturing = false
 
+    private var playbackEngine: AVAudioEngine?
     private var playerNode: AVAudioPlayerNode?
     private var playbackFormat: AVAudioFormat?
     private var playbackConverter: AVAudioConverter?
@@ -96,17 +99,14 @@ final class AudioManager: @unchecked Sendable {
             self.playbackEpoch &+= 1
             self.samplesScheduled = 0
             self.samplesPlayed = 0
-            self.playerNode?.stop()
-            self.playerNode = nil
-            self.playbackFormat = nil
-            self.playbackConverter = nil
+            self.teardownPlayback()
+            self.isPlaying = false
         }
         audioQueue.async { [weak self] in
             guard let self else { return }
             self.capturing = false
             self.isCapturing = false
-            self.isPlaying = false
-            self.teardown()
+            self.teardownInput()
         }
     }
 
@@ -180,14 +180,14 @@ final class AudioManager: @unchecked Sendable {
 
     private func ensurePlayerReady() throws {
         let engine: AVAudioEngine
-        if let existing = self.audioEngine {
+        if let existing = self.playbackEngine {
             engine = existing
         } else {
             engine = AVAudioEngine()
-            self.audioEngine = engine
+            self.playbackEngine = engine
         }
 
-        // If the player was detached (e.g. by teardown on audioQueue), discard it
+        // If the player was detached, discard it
         if let existing = playerNode, !engine.attachedNodes.contains(existing) {
             playerNode = nil
             playbackFormat = nil
@@ -360,7 +360,7 @@ final class AudioManager: @unchecked Sendable {
         teardownInput()
 
         let engine: AVAudioEngine
-        if let existing = self.audioEngine {
+        if let existing = self.captureEngine {
             engine = existing
         } else {
             engine = AVAudioEngine()
@@ -439,11 +439,7 @@ final class AudioManager: @unchecked Sendable {
         engine.prepare()
         try engine.start()
 
-        if wasRunning, let player = self.playerNode, !player.isPlaying {
-            player.play()
-        }
-
-        self.audioEngine = engine
+        self.captureEngine = engine
         self.mixerNode = mixer
         self.converter = audioConverter
         self.capturing = true
@@ -454,20 +450,28 @@ final class AudioManager: @unchecked Sendable {
 
     private func teardownInput() {
         mixerNode?.removeTap(onBus: 0)
-        if let mixer = mixerNode, let engine = audioEngine {
+        if let mixer = mixerNode, let engine = captureEngine {
             engine.disconnectNodeInput(mixer)
             engine.detach(mixer)
         }
         mixerNode = nil
         converter = nil
+        captureEngine?.stop()
+        captureEngine = nil
+    }
+
+    private func teardownPlayback() {
+        playerNode?.stop()
+        playerNode = nil
+        playbackFormat = nil
+        playbackConverter = nil
+        playbackEngine?.stop()
+        playbackEngine = nil
     }
 
     private func teardown() {
         teardownInput()
-        playerNode?.stop()
-        playerNode = nil
-        audioEngine?.stop()
-        audioEngine = nil
+        teardownPlayback()
     }
 
     private func convert(
