@@ -44,7 +44,7 @@ Deepgram Voice Agent API (server-side orchestration)
 - Live `UpdateThink` / `UpdateSpeak` refreshes for compatible settings changes
 - Local latency metrics for capture start, first audio send, first audio receive, and playback start
 - Automatic reconnection with exponential backoff
-- Idle-aware keepalive to maintain the WebSocket connection without extra chatter
+- Idle-aware keepalive scheduled from the last outbound activity to avoid timeout drift
 
 **Client-Side Tools (8 total)**
 

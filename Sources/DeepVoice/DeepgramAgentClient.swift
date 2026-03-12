@@ -72,8 +72,6 @@ final class DeepgramAgentClient: NSObject, @unchecked Sendable {
 
     private let maxReconnectAttempts = 5
     private let maxReconnectDelay: TimeInterval = 30.0
-    private let keepAliveCheckInterval: TimeInterval = 4.0
-    private let keepAliveIdleThreshold: TimeInterval = 8.0
 
     // MARK: - Public API
 
@@ -302,12 +300,12 @@ final class DeepgramAgentClient: NSObject, @unchecked Sendable {
     private func startKeepalive() {
         stopKeepalive()
         let timer = DispatchSource.makeTimerSource(queue: queue)
-        timer.schedule(deadline: .now() + keepAliveCheckInterval, repeating: keepAliveCheckInterval)
         timer.setEventHandler { [weak self] in
             self?.sendKeepAliveIfIdle()
         }
         timer.resume()
         keepaliveTimer = timer
+        scheduleNextKeepAlive()
     }
 
     private func stopKeepalive() {
@@ -379,12 +377,24 @@ final class DeepgramAgentClient: NSObject, @unchecked Sendable {
 
     private func sendKeepAliveIfIdle() {
         guard isConnected else { return }
-        guard Date().timeIntervalSince(lastOutboundActivity) >= keepAliveIdleThreshold else { return }
+        let now = Date()
+        let nextDelay = VoiceAgentKeepAlivePolicy.nextDelay(since: lastOutboundActivity, now: now)
+        guard nextDelay == 0 else {
+            scheduleNextKeepAlive(after: nextDelay)
+            return
+        }
         sendJSONOnQueue(["type": "KeepAlive"])
     }
 
-    private func recordOutboundActivity() {
-        lastOutboundActivity = Date()
+    private func scheduleNextKeepAlive(after delay: TimeInterval? = nil) {
+        guard let keepaliveTimer else { return }
+        let nextDelay = delay ?? VoiceAgentKeepAlivePolicy.nextDelay(since: lastOutboundActivity)
+        keepaliveTimer.schedule(deadline: .now() + nextDelay)
+    }
+
+    private func recordOutboundActivity(now: Date = Date()) {
+        lastOutboundActivity = now
+        scheduleNextKeepAlive(after: VoiceAgentKeepAlivePolicy.interval)
     }
 }
 

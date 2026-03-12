@@ -58,7 +58,7 @@ It is responsible for:
 - streaming user audio to Deepgram
 - receiving assistant audio and events
 - function-call request/response transport
-- idle-aware keepalive behavior
+- idle-aware keepalive scheduled relative to the last outbound activity
 
 ### `AudioManager`
 
