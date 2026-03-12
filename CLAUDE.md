@@ -12,7 +12,7 @@ Swift macOS App
     v
 Deepgram Voice Agent API (server-side orchestration)
     |-- STT: Deepgram Nova-3
-    |-- LLM: BYO via OpenRouter (google/gemini-3.1-flash-lite-preview)
+    |-- LLM: BYO via OpenRouter (default: gemini-3.1-flash-lite-preview, configurable)
     |-- TTS: Deepgram Aura-2 (aura-2-vesta-en)
     |-- Function calling: client-side (FunctionCallRequest/Response)
 ```
@@ -28,7 +28,7 @@ Requires macOS 14+ with Xcode command line tools.
 
 ## API Keys
 
-Set via Settings UI (Option+Shift+S), stored in macOS Keychain (`com.thebrownproject.deepvoice`):
+Set via Settings UI (Option+Shift+S). Stored in macOS Keychain (`com.thebrownproject.deepvoice`) with a file-based fallback at `~/.deepvoice/keys.json` for unsigned `swift run` builds where Keychain access fails.
 
 | Key | Account | Used For |
 |-----|---------|----------|
@@ -46,8 +46,8 @@ Set via Settings UI (Option+Shift+S), stored in macOS Keychain (`com.thebrownpro
 | Binary frames | PCM16 24kHz mono audio from mic |
 | `FunctionCallResponse` | Tool execution result (id, name, content) |
 | `KeepAlive` | Sent every 10s to maintain connection |
-| `UpdateSpeak` / `UpdateThink` / `UpdatePrompt` | Runtime config updates |
-| `InjectUserMessage` / `InjectAgentMessage` | Inject text messages |
+| `UpdateSpeak` / `UpdateThink` / `UpdatePrompt` | Runtime config updates (UpdatePrompt used for conversation history injection on reconnect) |
+| `InjectUserMessage` / `InjectAgentMessage` | Inject text messages (avoid for history -- causes re-execution of tool calls) |
 
 ### Server -> Client
 
@@ -85,10 +85,14 @@ All 8 tools execute client-side. Voice Agent sends `FunctionCallRequest`, app ru
 2. **BYO LLM via OpenRouter** -- `provider.type = "open_ai"` with custom `endpoint` pointing at OpenRouter's OpenAI-compatible API
 3. **Client-side function calling** -- all tools run locally on the Mac, results sent back through the WebSocket
 4. **Shell metacharacter blocking** -- safe_bash rejects `;|&\`$(){}\\!<>\n\r` before allowlist check to prevent injection
-5. **Approval flow via async continuations** -- FunctionCallHandler suspends, AppDelegate shows UI, continuation resumes on approve/reject
-6. **Separate audio engines** -- Capture and playback use independent AVAudioEngine instances to prevent Bluetooth HFP mode switch (which degrades all system audio when AirPods mic is used). Capture engine forces built-in mic via CoreAudio.
-7. **ConfigStore as single source of truth** -- `@Observable` ConfigStore shared via SwiftUI `.environment()`. Settings UI binds directly to it. Config changes propagate live to ToolRegistry via `withObservationTracking`.
-8. **Safe mode blocks destructive tools at execute time** -- When enabled, `ToolRegistry.execute()` rejects destructive tools before running the handler. Off by default.
+5. **Approval flow via async continuations** -- FunctionCallHandler suspends, AppDelegate shows UI, continuation resumes on approve/reject. `confirmDestructive` is off by default.
+6. **Tool name aliasing** -- LLMs often call "bash" instead of "safe_bash". Three-layer fix: (1) system prompt explicitly names tools, (2) "bash" registered as alias in Deepgram tool list, (3) client-side alias mapping in FunctionCallHandler resolves bash/shell/run_bash to safe_bash
+7. **Separate audio engines** -- Capture and playback use independent AVAudioEngine instances to prevent Bluetooth HFP mode switch. `Clear Output` uses HAL capture on non-Bluetooth mic. `AirPods Mic` uses VoiceProcessingIO at 44.1kHz with conversion to 24kHz.
+8. **ConfigStore as single source of truth** -- `@Observable` ConfigStore shared via SwiftUI `.environment()`. Settings UI binds directly to it. Config changes propagate live to ToolRegistry via `withObservationTracking`.
+9. **Safe mode blocks destructive tools at execute time** -- When enabled, `ToolRegistry.execute()` rejects destructive tools before running the handler. Off by default.
+10. **Conversation history via UpdatePrompt** -- On WebSocket reconnect, transcript history is injected into the system prompt via `UpdatePrompt`. Using `InjectUserMessage`/`InjectAgentMessage` causes the agent to re-execute old tool calls. History only persists within the app session (not across restarts).
+11. **Voice-first output formatting** -- System prompt instructs the LLM to never use markdown, backticks, asterisks, or bullet points since all output is spoken via TTS.
+12. **File-based API key fallback** -- Keychain access fails for unsigned `swift run` builds. `KeychainHelper` falls back to `~/.deepvoice/keys.json` (chmod 600, gitignored).
 
 ## Conventions
 
@@ -106,7 +110,8 @@ All 8 tools execute client-side. Voice Agent sends `FunctionCallRequest`, app ru
 
 ```
 ~/.deepvoice/
-    config.json          # DeepVoiceConfig (providers, model, voice, flags)
+    config.json          # DeepVoiceConfig (providers, model, voice, audio route mode, flags)
+    keys.json            # File-based API key fallback (chmod 600, gitignored)
     profile.md           # User profile
     preferences.md       # User preferences
     daily/               # Daily context directory

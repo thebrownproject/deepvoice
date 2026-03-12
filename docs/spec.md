@@ -1,4 +1,6 @@
-# Pipecat Migration Spike - Specification
+# Pipecat Migration Spike - Specification (Historical Reference)
+
+> **Note:** This spec is from the Samantha project's Pipecat evaluation. DeepVoice used Deepgram Voice Agent API directly instead. Kept for reference.
 
 ## Purpose
 

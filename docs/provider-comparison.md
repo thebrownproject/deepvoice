@@ -1,4 +1,6 @@
-# Provider Comparison
+# Provider Comparison (Historical Reference)
+
+> **Note:** This comparison is from the Samantha project's provider evaluation. DeepVoice uses Deepgram Voice Agent API with BYO LLM via OpenRouter. Kept for reference on provider pricing and tradeoffs.
 
 ## Current Cost Profile (OpenAI Only)
 

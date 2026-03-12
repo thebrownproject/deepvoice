@@ -32,15 +32,16 @@ Deepgram Voice Agent API (server-side orchestration)
 
 **Tools:** Client-side execution via function calling -- bash, files, AppleScript, screen capture, web search, deep reasoning
 
-**Infrastructure:** macOS Keychain (API keys) . KeyboardShortcuts (SPM)
+**Infrastructure:** macOS Keychain + file fallback (API keys) . KeyboardShortcuts (SPM)
 
 ## Features
 
 **Voice Conversation**
 - Full-duplex voice loop: speak naturally, hear responses
 - Barge-in support (interrupt agent while speaking)
+- Conversation history preserved across reconnects within a session
+- Voice-optimized output (no markdown artifacts in speech)
 - Latency metrics (total, TTS, LLM) logged per turn
-- Automatic reconnection with exponential backoff
 - 10s keepalive to maintain WebSocket connection
 - Two audio route modes: `Clear Output` and `AirPods Mic`
 
@@ -115,7 +116,7 @@ DeepVoice/
 
         # Infrastructure
         Config.swift                  # DeepVoiceConfig (providers, model, voice, audio route mode)
-        KeychainHelper.swift          # Keychain storage for API keys
+        KeychainHelper.swift          # Keychain + file fallback for API keys
         HotkeyManager.swift           # Option+S toggle, Option+Shift+S settings
         Prompts.swift                 # System prompt + delegation prompt
         DesktopContextToolExecutor.swift  # macOS native context tools
@@ -137,7 +138,7 @@ Requires macOS 14+ with Xcode command line tools.
 
 ## API Keys
 
-Set via Settings UI (Option+Shift+S) or stored in macOS Keychain:
+Set via Settings UI (Option+Shift+S). Stored in macOS Keychain with file-based fallback (`~/.deepvoice/keys.json`) for unsigned builds:
 
 | Key | Purpose |
 |-----|---------|
@@ -150,6 +151,7 @@ Set via Settings UI (Option+Shift+S) or stored in macOS Keychain:
 ```
 ~/.deepvoice/
     config.json          # DeepVoiceConfig (providers, model, voice, audio route mode, flags)
+    keys.json            # File-based API key fallback (chmod 600, gitignored)
     profile.md           # User profile
     preferences.md       # User preferences
     daily/               # Daily context directory
@@ -163,10 +165,12 @@ Keychain: `com.thebrownproject.deepvoice` service.
 2. **BYO LLM via OpenRouter** -- `provider.type = "open_ai"` with custom `endpoint` pointing at OpenRouter's OpenAI-compatible API. Use any model.
 3. **Client-side function calling** -- all tools run locally on the Mac, results sent back through the WebSocket
 4. **Shell metacharacter blocking** -- safe_bash rejects `;|&\`$(){}\\!<>\n\r` before allowlist check to prevent injection
-5. **No Python backend** -- eliminates the local server, IPC protocol, and process management. One process, one WebSocket.
-6. **Dev console over floating widget** -- explicit visibility into agent state, logs, and tool calls during development
-7. **Two audio route modes** -- `Clear Output` uses HAL capture on a non-Bluetooth mic to preserve playback quality. `AirPods Mic` uses `VoiceProcessingIO` at 44.1kHz for headset capture, then converts to the 24kHz PCM16 wire format Deepgram expects.
-8. **ConfigStore as single source of truth** -- `@Observable` ConfigStore shared via SwiftUI `.environment()`. Settings UI binds directly. Config changes propagate live to ToolRegistry via `withObservationTracking`.
+5. **Tool name aliasing** -- LLMs call "bash" instead of "safe_bash". Fixed with prompt instructions, Deepgram alias registration, and client-side FunctionCallHandler mapping.
+6. **No Python backend** -- eliminates the local server, IPC protocol, and process management. One process, one WebSocket.
+7. **Dev console over floating widget** -- explicit visibility into agent state, logs, and tool calls during development
+8. **Two audio route modes** -- `Clear Output` uses HAL capture on a non-Bluetooth mic to preserve playback quality. `AirPods Mic` uses `VoiceProcessingIO` at 44.1kHz for headset capture, then converts to the 24kHz PCM16 wire format Deepgram expects.
+9. **Conversation history across reconnects** -- On WebSocket reconnect, transcript history is injected into the system prompt via `UpdatePrompt` so the agent has context from the current session.
+10. **ConfigStore as single source of truth** -- `@Observable` ConfigStore shared via SwiftUI `.environment()`. Settings UI binds directly. Config changes propagate live to ToolRegistry via `withObservationTracking`.
 
 ## Background
 

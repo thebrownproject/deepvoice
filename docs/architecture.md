@@ -1,4 +1,6 @@
-# Pipecat Migration - Architecture
+# Pipecat Migration - Architecture (Historical Reference)
+
+> **Note:** This document is from the Samantha project research phase. DeepVoice ultimately used Deepgram Voice Agent API directly instead of Pipecat. Kept for reference on the evaluation process and provider analysis.
 
 ## Current Architecture (OpenAI Agents SDK)
 

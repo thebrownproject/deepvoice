@@ -1,4 +1,6 @@
-# Research Findings
+# Research Findings (Historical Reference)
+
+> **Note:** These findings are from the Samantha project's Pipecat evaluation. DeepVoice used Deepgram Voice Agent API directly instead. Kept for reference.
 
 ## Pipecat Core (v0.0.73+)
 
