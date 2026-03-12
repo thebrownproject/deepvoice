@@ -19,7 +19,7 @@ struct CompanionView: View {
             Spacer(minLength: 24)
 
             // Presence ring
-            PresenceView(appState: state.appState, energy: max(state.captureEnergy, state.playbackEnergy))
+            PresenceView(appState: state.appState, captureEnergy: state.captureEnergy, playbackEnergy: state.playbackEnergy)
                 .frame(width: 250, height: 250)
 
             Spacer(minLength: 20)

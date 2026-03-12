@@ -10,12 +10,6 @@ struct DeepVoiceApp: App {
             DevConsoleView(state: appDelegate.consoleState, actions: appDelegate.consoleActions)
                 .environment(appDelegate.configStore)
         }
-        Window("DeepVoice", id: "companion") {
-            CompanionView(state: appDelegate.consoleState, actions: appDelegate.consoleActions)
-                .environment(appDelegate.configStore)
-        }
-        .windowStyle(.hiddenTitleBar)
-        .defaultSize(width: 400, height: 520)
         Settings {
             SettingsView()
                 .environment(appDelegate.configStore)
@@ -33,6 +27,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let desktopContextToolExecutor = DesktopContextToolExecutor()
     private(set) var toolRegistry: ToolRegistry?
     private(set) var functionCallHandler: FunctionCallHandler?
+    private var companionPanel: CompanionPanel?
 
     private var pendingContinuations: [String: CheckedContinuation<Bool, Never>] = [:]
     private var alwaysApprovedTools: Set<String> = []
@@ -56,8 +51,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.consoleState.isPlaying = playing
             self.consoleState.log("Audio state: capturing=\(capturing), playing=\(playing)", level: .debug)
         }
-        audioManager.onAudioEnergy = { [weak self] energy in
-            self?.consoleState.audioEnergy = CGFloat(energy)
+        audioManager.onCaptureEnergy = { [weak self] energy in
+            self?.consoleState.captureEnergy = CGFloat(energy)
+        }
+        audioManager.onPlaybackEnergy = { [weak self] energy in
+            self?.consoleState.playbackEnergy = CGFloat(energy)
         }
         audioManager.onCaptureError = { [weak self] message in
             self?.consoleState.log(message, level: .error)
@@ -98,10 +96,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         functionCallHandler = handler
 
         consoleState.log("DeepVoice launched (Voice Agent mode)")
+
+        let panel = CompanionPanel(state: consoleState, actions: consoleActions, configStore: configStore)
+        panel.orderFront(nil)
+        companionPanel = panel
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
-        true
+        // Keep running while companion panel is visible (NSPanel doesn't count as a "window" here)
+        !(companionPanel?.isVisible ?? false)
     }
 
     func applicationWillTerminate(_ notification: Notification) {

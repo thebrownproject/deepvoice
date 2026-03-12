@@ -45,10 +45,13 @@ enum AudioConstants {
 final class AudioManager: @unchecked Sendable {
     /// Called on main thread whenever capture/playback state changes.
     var onStateChange: ((_ isCapturing: Bool, _ isPlaying: Bool) -> Void)?
-    /// Called on main thread with smoothed 0..1 audio energy for PresenceView.
-    var onAudioEnergy: ((_ energy: Float) -> Void)?
+    /// Called on main thread with smoothed 0..1 capture energy (mic RMS).
+    var onCaptureEnergy: ((_ energy: Float) -> Void)?
+    /// Called on main thread with smoothed 0..1 playback energy (TTS RMS).
+    var onPlaybackEnergy: ((_ energy: Float) -> Void)?
 
-    private var smoothedEnergy: Float = 0
+    private var smoothedCaptureEnergy: Float = 0
+    private var smoothedPlaybackEnergy: Float = 0
     private let smoothingAlpha: Float = 0.3
 
     private(set) var isCapturing = false {
@@ -84,13 +87,21 @@ final class AudioManager: @unchecked Sendable {
         return sqrtf(sumSquares / Float(sampleCount))
     }
 
-    /// Apply EMA smoothing and dispatch energy to main thread.
-    /// Must be called from audioQueue or playbackQueue.
-    private func notifyEnergy(rms: Float) {
-        smoothedEnergy = smoothedEnergy * (1 - smoothingAlpha) + rms * smoothingAlpha
-        let energy = min(smoothedEnergy, 1.0)
+    /// Apply EMA smoothing for capture (mic) RMS and dispatch to main thread.
+    private func notifyCaptureEnergy(rms: Float) {
+        smoothedCaptureEnergy = smoothedCaptureEnergy * (1 - smoothingAlpha) + rms * smoothingAlpha
+        let energy = min(smoothedCaptureEnergy, 1.0)
         DispatchQueue.main.async { [weak self] in
-            self?.onAudioEnergy?(energy)
+            self?.onCaptureEnergy?(energy)
+        }
+    }
+
+    /// Apply EMA smoothing for playback (TTS) RMS and dispatch to main thread.
+    private func notifyPlaybackEnergy(rms: Float) {
+        smoothedPlaybackEnergy = smoothedPlaybackEnergy * (1 - smoothingAlpha) + rms * smoothingAlpha
+        let energy = min(smoothedPlaybackEnergy, 1.0)
+        DispatchQueue.main.async { [weak self] in
+            self?.onPlaybackEnergy?(energy)
         }
     }
 
@@ -175,9 +186,9 @@ final class AudioManager: @unchecked Sendable {
             guard let self else { return }
             self.capturing = false
             self.isCapturing = false
-            self.smoothedEnergy = 0
+            self.smoothedCaptureEnergy = 0
             self.teardownCapture()
-            self.notifyEnergy(rms: 0)
+            self.notifyCaptureEnergy(rms: 0)
         }
     }
 
@@ -186,9 +197,9 @@ final class AudioManager: @unchecked Sendable {
             guard let self else { return }
             self.capturing = false
             self.isCapturing = false
-            self.smoothedEnergy = 0
+            self.smoothedCaptureEnergy = 0
             self.teardownCapture()
-            self.notifyEnergy(rms: 0)
+            self.notifyCaptureEnergy(rms: 0)
         }
     }
 
@@ -207,7 +218,7 @@ final class AudioManager: @unchecked Sendable {
             guard let player = self.playerNode,
                   let srcBuffer = self.pcm16DataToBuffer(data) else { return }
 
-            self.notifyEnergy(rms: self.rmsFromPCM16Data(data))
+            self.notifyPlaybackEnergy(rms: self.rmsFromPCM16Data(data))
 
             // Convert from 24kHz PCM16 to native output format
             let buffer: AVAudioPCMBuffer
@@ -247,8 +258,8 @@ final class AudioManager: @unchecked Sendable {
             self.samplesPlayed = 0
             self.playerNode?.stop()
             self.isPlaying = false
-            self.smoothedEnergy = 0
-            self.notifyEnergy(rms: 0)
+            self.smoothedPlaybackEnergy = 0
+            self.notifyPlaybackEnergy(rms: 0)
             log.debug("Playback stopped (epoch \(self.playbackEpoch))")
         }
     }
@@ -902,7 +913,7 @@ final class AudioManager: @unchecked Sendable {
 
         guard let pcmData else { return }
         onChunk(pcmData)
-        notifyEnergy(rms: rmsFromPCM16Data(pcmData))
+        notifyCaptureEnergy(rms: rmsFromPCM16Data(pcmData))
     }
 
     private func requireNoErr(_ status: OSStatus, operation: String) throws {
