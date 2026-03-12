@@ -1,5 +1,9 @@
 # Research Findings
 
+Historical note: this file contains Pipecat-era research notes from the migration spike and does not describe the current DeepVoice implementation.
+
+For the current implementation, see `docs/current-architecture.md`.
+
 ## Pipecat Core (v0.0.73+)
 
 **Repo**: https://github.com/pipecat-ai/pipecat

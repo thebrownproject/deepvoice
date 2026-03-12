@@ -84,7 +84,8 @@ DeepVoice/
         FunctionCallHandler.swift     # Bridges FunctionCallRequest to ToolRegistry
 
         # App
-        DeepVoiceApp.swift            # @main app, AppDelegate, delegate wiring
+        DeepVoiceApp.swift            # @main app and thin AppDelegate wiring
+        VoiceAgentRuntime.swift       # Voice Agent session controller and runtime state
         DevConsoleState.swift         # Console state, log entries, approvals
         DevConsoleView.swift          # Dev console UI
         SettingsView.swift            # API keys, voice, model settings
@@ -111,10 +112,11 @@ DeepVoice/
         Prompts.swift                 # System prompt + delegation prompt
         DesktopContextToolExecutor.swift  # macOS native context tools
     docs/
-        architecture.md               # Architecture comparison and migration notes
-        provider-comparison.md         # STT/LLM/TTS provider analysis
-        spec.md                        # Original specification
-        findings.md                    # Research findings
+        current-architecture.md        # Current DeepVoice runtime and session design
+        architecture.md                # Historical Pipecat migration notes
+        provider-comparison.md         # Historical provider analysis from the migration spike
+        spec.md                        # Historical migration spike specification
+        findings.md                    # Historical research findings
 ```
 
 ## Build

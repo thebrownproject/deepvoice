@@ -1,5 +1,9 @@
 # Pipecat Migration Spike - Specification
 
+Historical note: this is the original migration-spike specification, not the current DeepVoice implementation spec.
+
+For the current runtime design, see `docs/current-architecture.md`.
+
 ## Purpose
 
 Evaluate migrating Samantha's Python backend from the OpenAI Agents SDK to Pipecat, an open-source real-time voice agent framework. The goal is provider flexibility and cost reduction while maintaining the low-latency voice experience.
