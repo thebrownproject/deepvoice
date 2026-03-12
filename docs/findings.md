@@ -193,7 +193,7 @@ flow_manager = FlowManager(
 Pipecat provides an official Swift SDK (separate repo, docs at https://docs.pipecat.ai/client/ios/introduction). However, for the spike we should keep our existing Swift app and WebSocket client. The Pipecat Swift SDK would only matter if we wanted to replace the entire frontend.
 
 Our Swift app is already well-built and handles:
-- Audio I/O (AVAudioEngine, 24kHz PCM16)
+- Audio I/O (AVAudioEngine playback, AudioUnit capture, 24kHz PCM16 wire format)
 - WebSocket transport (URLSessionWebSocketTask, 20MB max)
 - JSON control protocol (protocol_version 1)
 - Tool approval UI

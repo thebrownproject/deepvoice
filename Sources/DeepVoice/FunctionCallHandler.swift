@@ -50,19 +50,33 @@ final class FunctionCallHandler: @unchecked Sendable {
         }
     }
 
+    /// Common LLM hallucinated tool names mapped to real tool names.
+    private static let toolAliases: [String: String] = [
+        "bash": "safe_bash",
+        "shell": "safe_bash",
+        "run_bash": "safe_bash",
+        "execute": "safe_bash",
+        "read_file": "file_read",
+        "write_file": "file_write",
+    ]
+
     private func process(id: String, name: String, arguments: String) async -> String {
-        log.info("Function call: \(name) (id: \(id))")
+        let resolvedName = Self.toolAliases[name] ?? name
+        if resolvedName != name {
+            log.info("Aliased tool \(name) -> \(resolvedName)")
+        }
+        log.info("Function call: \(resolvedName) (id: \(id))")
 
         // Approval gate
-        if toolRegistry.needsApproval(name) {
+        if toolRegistry.needsApproval(resolvedName) {
             do {
-                let approved = try await requestApproval(id: id, name: name, arguments: arguments)
+                let approved = try await requestApproval(id: id, name: resolvedName, arguments: arguments)
                 if !approved {
-                    log.info("User rejected \(name)")
-                    return "Error: \(FunctionCallError.approvalRejected(name: name).localizedDescription)"
+                    log.info("User rejected \(resolvedName)")
+                    return "Error: \(FunctionCallError.approvalRejected(name: resolvedName).localizedDescription)"
                 }
             } catch {
-                log.warning("Approval failed for \(name): \(error.localizedDescription)")
+                log.warning("Approval failed for \(resolvedName): \(error.localizedDescription)")
                 return "Error: \(error.localizedDescription)"
             }
         }
@@ -71,7 +85,7 @@ final class FunctionCallHandler: @unchecked Sendable {
         let toolCall = ToolCall(
             id: id,
             type: "function",
-            function: FunctionCall(name: name, arguments: arguments)
+            function: FunctionCall(name: resolvedName, arguments: arguments)
         )
 
         do {

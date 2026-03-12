@@ -1,0 +1,9 @@
+.build/
+.swiftpm/
+Package.resolved
+*.xcodeproj/
+xcuserdata/
+DerivedData/
+
+# API keys (file-based fallback for unsigned builds)
+keys.json

@@ -261,12 +261,52 @@ extension AppDelegate: DeepgramAgentDelegate {
         Task { @MainActor [weak self] in
             guard let self else { return }
             self.consoleState.log("Voice Agent ready")
+
+            // Inject previous conversation history so the agent has context
+            self.injectConversationHistory()
+
             self.setState(.listening)
 
             self.audioManager.startCapture { [weak self] data in
                 self?.agentClient.sendAudio(data)
             }
         }
+    }
+
+    /// Inject transcript history into the new Voice Agent session via UpdatePrompt.
+    /// Uses prompt context instead of individual message injection to avoid the
+    /// agent re-executing tool calls or responding to old messages.
+    private func injectConversationHistory() {
+        let entries = consoleState.transcriptEntries.filter { $0.isFinal && !$0.text.isEmpty }
+        guard !entries.isEmpty else { return }
+
+        // Skip greetings
+        let meaningful = entries.filter { !($0.role == "assistant" && $0.text == "Hey there!") }
+        guard !meaningful.isEmpty else { return }
+
+        // Build a conversation summary to prepend to the system prompt
+        var lines: [String] = []
+        for entry in meaningful {
+            let prefix = entry.isUser ? "User" : "You"
+            lines.append("\(prefix): \(entry.text)")
+        }
+
+        let history = lines.joined(separator: "\n")
+        let updatedPrompt = """
+            \(Prompts.system)
+
+            CONVERSATION HISTORY
+
+            The following is your conversation with the user from earlier in this session. \
+            Do not repeat or re-execute anything from this history. Just use it as context \
+            for the ongoing conversation. Continue naturally from where you left off. \
+            Do not greet the user again or re-introduce yourself.
+
+            \(history)
+            """
+
+        consoleState.log("Resuming with \(meaningful.count) messages of context", level: .debug)
+        agentClient.updatePrompt(updatedPrompt)
     }
 
     nonisolated func agentUserStartedSpeaking() {

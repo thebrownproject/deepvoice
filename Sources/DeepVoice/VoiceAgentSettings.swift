@@ -133,7 +133,7 @@ enum VoiceAgentSettingsBuilder {
     /// All functions are client-side (no `endpoint`), so the agent sends FunctionCallRequest
     /// and we respond with FunctionCallResponse after local execution.
     private static func toolFunctions(from registry: ToolRegistry) -> [[String: Any]] {
-        registry.toolDefinitions().compactMap { def -> [String: Any]? in
+        var functions = registry.toolDefinitions().compactMap { def -> [String: Any]? in
             guard let params = def.function.parameters.toAny() else { return nil }
             return [
                 "name": def.function.name,
@@ -141,6 +141,19 @@ enum VoiceAgentSettingsBuilder {
                 "parameters": params,
             ]
         }
+
+        // Register common aliases so Deepgram doesn't reject hallucinated tool names.
+        // FunctionCallHandler maps these back to the real tool.
+        if let safeBash = functions.first(where: { $0["name"] as? String == "safe_bash" }),
+           let params = safeBash["parameters"] {
+            functions.append([
+                "name": "bash",
+                "description": "Alias for safe_bash. Execute a shell command.",
+                "parameters": params,
+            ])
+        }
+
+        return functions
     }
 }
 

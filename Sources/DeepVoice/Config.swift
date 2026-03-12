@@ -57,7 +57,7 @@ struct DeepVoiceConfig: Codable, Equatable {
         voice: "aura-2-vesta-en",
         audioRouteMode: .highQualityOutput,
         safeMode: false,
-        confirmDestructive: true
+        confirmDestructive: false
     )
 
     static var dataDir: URL {

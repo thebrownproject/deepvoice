@@ -10,7 +10,7 @@ Voice-first AI desktop companion for macOS. Pure Swift app with a single WebSock
 ## Architecture
 
 ```
-macOS App (SwiftUI/AppKit, AVAudioEngine, hotkey, dev console)
+macOS App (SwiftUI/AppKit, AVAudioEngine + AudioUnit capture, hotkey, dev console)
     |
     | Single WebSocket (wss://agent.deepgram.com/v1/agent/converse)
     | - Binary frames: PCM16 24kHz mono audio (both directions)
@@ -26,7 +26,7 @@ Deepgram Voice Agent API (server-side orchestration)
 
 ## Tech Stack
 
-**App:** Swift 5.9 . SwiftUI . AppKit . AVAudioEngine . URLSessionWebSocketTask
+**App:** Swift 5.9 . SwiftUI . AppKit . AVAudioEngine . CoreAudio/AudioUnit . URLSessionWebSocketTask
 
 **Voice Pipeline:** Deepgram Voice Agent API (Nova-3 STT + Aura-2 TTS) . OpenRouter (BYO LLM)
 
@@ -42,6 +42,7 @@ Deepgram Voice Agent API (server-side orchestration)
 - Latency metrics (total, TTS, LLM) logged per turn
 - Automatic reconnection with exponential backoff
 - 10s keepalive to maintain WebSocket connection
+- Two audio route modes: `Clear Output` and `AirPods Mic`
 
 **Client-Side Tools (8 total)**
 
@@ -66,9 +67,19 @@ Deepgram Voice Agent API (server-side orchestration)
 **Settings**
 - API key management (Deepgram, OpenRouter, OpenAI) stored in Keychain
 - Voice selection (12 Aura-2 + 3 legacy Aura-1 voices)
+- Audio route mode selection for Bluetooth headsets
 - LLM model selection (any OpenRouter model)
 - Global hotkey configuration
 - Safe mode and destructive action confirmation toggles
+
+## Audio Modes
+
+DeepVoice ships with two audio route modes:
+
+- `Clear Output`: uses a built-in or other non-Bluetooth mic for capture and keeps Bluetooth headphones focused on playback quality.
+- `AirPods Mic`: uses macOS `VoiceProcessingIO` for headset capture so AirPods-style conversation works more naturally. This mode still uses the Bluetooth headset path, so audio may sound like call audio rather than music-quality playback.
+
+Use `Clear Output` if you care most about assistant voice quality. Use `AirPods Mic` if you care most about natural full-duplex conversation on a Bluetooth headset.
 
 ## Project Structure
 
@@ -100,10 +111,10 @@ DeepVoice/
         OpenAIClient.swift            # Shared OpenAI API caller and model constants
 
         # Audio
-        AudioManager.swift            # Separate AVAudioEngine capture (built-in mic) + playback (system output)
+        AudioManager.swift            # Dual audio modes: HAL capture for clear output, VoiceProcessingIO for headset mic mode
 
         # Infrastructure
-        Config.swift                  # DeepVoiceConfig (providers, model, voice)
+        Config.swift                  # DeepVoiceConfig (providers, model, voice, audio route mode)
         KeychainHelper.swift          # Keychain storage for API keys
         HotkeyManager.swift           # Option+S toggle, Option+Shift+S settings
         Prompts.swift                 # System prompt + delegation prompt
@@ -138,7 +149,7 @@ Set via Settings UI (Option+Shift+S) or stored in macOS Keychain:
 
 ```
 ~/.deepvoice/
-    config.json          # DeepVoiceConfig (providers, model, voice, flags)
+    config.json          # DeepVoiceConfig (providers, model, voice, audio route mode, flags)
     profile.md           # User profile
     preferences.md       # User preferences
     daily/               # Daily context directory
@@ -154,7 +165,7 @@ Keychain: `com.thebrownproject.deepvoice` service.
 4. **Shell metacharacter blocking** -- safe_bash rejects `;|&\`$(){}\\!<>\n\r` before allowlist check to prevent injection
 5. **No Python backend** -- eliminates the local server, IPC protocol, and process management. One process, one WebSocket.
 6. **Dev console over floating widget** -- explicit visibility into agent state, logs, and tool calls during development
-7. **Separate audio engines** -- Capture and playback use independent AVAudioEngine instances to prevent Bluetooth HFP mode switch when AirPods mic is used. Capture engine forces built-in mic via CoreAudio.
+7. **Two audio route modes** -- `Clear Output` uses HAL capture on a non-Bluetooth mic to preserve playback quality. `AirPods Mic` uses `VoiceProcessingIO` at 44.1kHz for headset capture, then converts to the 24kHz PCM16 wire format Deepgram expects.
 8. **ConfigStore as single source of truth** -- `@Observable` ConfigStore shared via SwiftUI `.environment()`. Settings UI binds directly. Config changes propagate live to ToolRegistry via `withObservationTracking`.
 
 ## Background

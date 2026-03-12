@@ -151,14 +151,21 @@ private struct KeyField: View {
 
     var body: some View {
         LabeledContent(label) {
-            SecureField("", text: $value, prompt: Text(placeholder))
-                .textFieldStyle(.roundedBorder)
-                .font(.system(.body, design: .monospaced))
-                .focused($isFocused)
-                .onSubmit { persist() }
-                .onChange(of: isFocused) { wasFocused, isFocused in
-                    if wasFocused && !isFocused { persist() }
+            HStack(spacing: 6) {
+                SecureField("", text: $value, prompt: Text(placeholder))
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(.body, design: .monospaced))
+                    .focused($isFocused)
+                    .onSubmit { persist() }
+                    .onChange(of: isFocused) { wasFocused, isFocused in
+                        if wasFocused && !isFocused { persist() }
+                    }
+                if !value.isEmpty {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(.green)
+                        .help("Key configured")
                 }
+            }
         }
     }
 

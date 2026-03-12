@@ -5,7 +5,7 @@
 ```
 +-----------------------------------------------------------+
 |  Swift macOS App                                          |
-|  - Audio I/O (AVAudioEngine, 24kHz PCM16 mono)           |
+|  - Audio I/O (AVAudioEngine playback + AudioUnit capture, 24kHz PCM16 mono wire format) |
 |  - Dev Console UI                                         |
 |  - Hotkey (Option+S)                                      |
 |  - Desktop context tools (frontmost_app, capture_display) |
