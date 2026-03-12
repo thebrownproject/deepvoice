@@ -10,6 +10,12 @@ struct DeepVoiceApp: App {
             DevConsoleView(state: appDelegate.consoleState, actions: appDelegate.consoleActions)
                 .environment(appDelegate.configStore)
         }
+        Window("DeepVoice", id: "companion") {
+            CompanionView(state: appDelegate.consoleState, actions: appDelegate.consoleActions)
+                .environment(appDelegate.configStore)
+        }
+        .windowStyle(.hiddenTitleBar)
+        .defaultSize(width: 400, height: 520)
         Settings {
             SettingsView()
                 .environment(appDelegate.configStore)
@@ -49,6 +55,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.consoleState.isCapturing = capturing
             self.consoleState.isPlaying = playing
             self.consoleState.log("Audio state: capturing=\(capturing), playing=\(playing)", level: .debug)
+        }
+        audioManager.onAudioEnergy = { [weak self] energy in
+            self?.consoleState.audioEnergy = CGFloat(energy)
         }
         audioManager.onCaptureError = { [weak self] message in
             self?.consoleState.log(message, level: .error)

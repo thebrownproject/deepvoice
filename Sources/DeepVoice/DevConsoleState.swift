@@ -15,6 +15,7 @@ final class DevConsoleState {
     var connectionState: ConnectionState = .disconnected
     var isCapturing = false
     var isPlaying = false
+    var audioEnergy: CGFloat = 0
 
     var logEntries: [ConsoleLogEntry] = []
     var transcriptEntries: [TranscriptEntry] = []

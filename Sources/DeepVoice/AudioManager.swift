@@ -45,6 +45,11 @@ enum AudioConstants {
 final class AudioManager: @unchecked Sendable {
     /// Called on main thread whenever capture/playback state changes.
     var onStateChange: ((_ isCapturing: Bool, _ isPlaying: Bool) -> Void)?
+    /// Called on main thread with smoothed 0..1 audio energy for PresenceView.
+    var onAudioEnergy: ((_ energy: Float) -> Void)?
+
+    private var smoothedEnergy: Float = 0
+    private let smoothingAlpha: Float = 0.3
 
     private(set) var isCapturing = false {
         didSet { notifyState() }
@@ -61,6 +66,31 @@ final class AudioManager: @unchecked Sendable {
         let playing = isPlaying
         DispatchQueue.main.async { [weak self] in
             self?.onStateChange?(capturing, playing)
+        }
+    }
+
+    /// Compute RMS from PCM16 (Int16) samples in raw Data, returns 0..1.
+    private func rmsFromPCM16Data(_ data: Data) -> Float {
+        let sampleCount = data.count / 2
+        guard sampleCount > 0 else { return 0 }
+        var sumSquares: Float = 0
+        data.withUnsafeBytes { raw in
+            let samples = raw.bindMemory(to: Int16.self)
+            for i in 0..<sampleCount {
+                let normalized = Float(samples[i]) / 32768.0
+                sumSquares += normalized * normalized
+            }
+        }
+        return sqrtf(sumSquares / Float(sampleCount))
+    }
+
+    /// Apply EMA smoothing and dispatch energy to main thread.
+    /// Must be called from audioQueue or playbackQueue.
+    private func notifyEnergy(rms: Float) {
+        smoothedEnergy = smoothedEnergy * (1 - smoothingAlpha) + rms * smoothingAlpha
+        let energy = min(smoothedEnergy, 1.0)
+        DispatchQueue.main.async { [weak self] in
+            self?.onAudioEnergy?(energy)
         }
     }
 
@@ -145,7 +175,9 @@ final class AudioManager: @unchecked Sendable {
             guard let self else { return }
             self.capturing = false
             self.isCapturing = false
+            self.smoothedEnergy = 0
             self.teardownCapture()
+            self.notifyEnergy(rms: 0)
         }
     }
 
@@ -154,7 +186,9 @@ final class AudioManager: @unchecked Sendable {
             guard let self else { return }
             self.capturing = false
             self.isCapturing = false
+            self.smoothedEnergy = 0
             self.teardownCapture()
+            self.notifyEnergy(rms: 0)
         }
     }
 
@@ -172,6 +206,8 @@ final class AudioManager: @unchecked Sendable {
 
             guard let player = self.playerNode,
                   let srcBuffer = self.pcm16DataToBuffer(data) else { return }
+
+            self.notifyEnergy(rms: self.rmsFromPCM16Data(data))
 
             // Convert from 24kHz PCM16 to native output format
             let buffer: AVAudioPCMBuffer
@@ -211,6 +247,8 @@ final class AudioManager: @unchecked Sendable {
             self.samplesPlayed = 0
             self.playerNode?.stop()
             self.isPlaying = false
+            self.smoothedEnergy = 0
+            self.notifyEnergy(rms: 0)
             log.debug("Playback stopped (epoch \(self.playbackEpoch))")
         }
     }
@@ -852,16 +890,19 @@ final class AudioManager: @unchecked Sendable {
             targetBuffer = sourceBuffer
         }
 
+        let pcmData: Data?
         switch targetBuffer.format.commonFormat {
         case .pcmFormatFloat32:
-            guard let pcmData = float32ToPCM16Data(targetBuffer) else { return }
-            onChunk(pcmData)
+            pcmData = float32ToPCM16Data(targetBuffer)
         case .pcmFormatInt16:
-            guard let pcmData = pcm16BufferToData(targetBuffer) else { return }
-            onChunk(pcmData)
+            pcmData = pcm16BufferToData(targetBuffer)
         default:
             return
         }
+
+        guard let pcmData else { return }
+        onChunk(pcmData)
+        notifyEnergy(rms: rmsFromPCM16Data(pcmData))
     }
 
     private func requireNoErr(_ status: OSStatus, operation: String) throws {
