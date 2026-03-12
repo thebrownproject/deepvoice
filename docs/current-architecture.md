@@ -4,6 +4,8 @@ This document describes the current DeepVoice implementation in this repository.
 
 For older Pipecat migration research, see the other files in `docs/`. Those are historical notes, not the current runtime design.
 
+For the latest validation status and recommended follow-up order, see `docs/verification-and-next-steps.md`.
+
 ## Overview
 
 DeepVoice is a pure Swift macOS app built around Deepgram's Voice Agent API.
@@ -180,3 +182,5 @@ These are the main areas still worth improving:
 2. True end-to-end validation still requires a real macOS environment for mic, hotkey, and screen-permission behavior.
 3. If Deepgram adds a documented explicit cancel or flush message for current speech, interruption should use it instead of relying mainly on local suppression.
 4. Screenshot fidelity is optimized for latency right now; it may be worth making that user-configurable later.
+
+The recommended order for those items is documented in `docs/verification-and-next-steps.md`.

@@ -114,6 +114,7 @@ DeepVoice/
         DesktopContextToolExecutor.swift  # macOS native context tools
     docs/
         current-architecture.md        # Current DeepVoice runtime and session design
+        verification-and-next-steps.md # Current validation state and recommended next work
         architecture.md                # Historical Pipecat migration notes
         provider-comparison.md         # Historical provider analysis from the migration spike
         spec.md                        # Historical migration spike specification
@@ -149,6 +150,9 @@ Current Voice Agent settings behavior:
 - non-Flux Deepgram STT models use `version: v1`
 - Flux omits `smart_format`, while non-Flux Deepgram STT enables it
 - the app relies on Deepgram's default context window behavior instead of forcing `context_length`
+
+Current validation handoff:
+- see `docs/verification-and-next-steps.md` for the latest hosted macOS verification status and the recommended order of further work
 
 ## API Keys
 
