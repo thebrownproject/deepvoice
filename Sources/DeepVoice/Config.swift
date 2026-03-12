@@ -26,8 +26,8 @@ struct DeepVoiceConfig: Codable, Equatable {
         sttProvider: "deepgram",
         ttsProvider: "deepgram",
         llmProvider: "openrouter",
-        llmModel: "minimax/minimax-m2.5",
-        voice: "aura-2-luna-en",
+        llmModel: "google/gemini-3.1-flash-lite-preview",
+        voice: "aura-2-vesta-en",
         safeMode: false,
         confirmDestructive: true
     )
