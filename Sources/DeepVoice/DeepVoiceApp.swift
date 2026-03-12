@@ -233,11 +233,13 @@ extension AppDelegate: DeepgramAgentDelegate {
                 return
             }
 
+            // Skip greeting on reconnect when we have conversation history
+            let hasHistory = self.consoleState.transcriptEntries.contains { $0.isFinal && !$0.text.isEmpty }
             let settings = VoiceAgentSettingsBuilder.build(
                 config: self.configStore.config,
                 toolRegistry: registry,
                 openRouterKey: orKey,
-                greeting: "Hey there!"
+                greeting: hasHistory ? nil : "Hey there!"
             )
             self.agentClient.sendSettings(settings)
         }
@@ -266,6 +268,10 @@ extension AppDelegate: DeepgramAgentDelegate {
             self.injectConversationHistory()
 
             self.setState(.listening)
+
+            // Brief delay so greeting audio can start playing before capture
+            // engine init (VPIO setup can disrupt in-progress playback)
+            try? await Task.sleep(nanoseconds: 500_000_000)
 
             self.audioManager.startCapture { [weak self] data in
                 self?.agentClient.sendAudio(data)

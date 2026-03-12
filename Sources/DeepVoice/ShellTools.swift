@@ -4,12 +4,13 @@ import os
 private let log = Logger(subsystem: "com.thebrownproject.deepvoice", category: "ShellTools")
 
 private let maxOutput = 10_240
-private let processTimeout: TimeInterval = 30
+private let processTimeout: TimeInterval = 10
 
 private let bashAllowlist: Set<String> = [
     "open", "ls", "cat", "head", "tail", "wc", "file", "which", "whoami",
     "date", "cal", "pwd", "echo", "mkdir", "cp", "mv", "rm", "touch",
     "grep", "find", "sort", "uniq", "diff", "tr", "cut", "pbcopy", "pbpaste",
+    "ddgr", "curl", "jq", "sw_vers", "defaults", "pmset", "df", "du",
 ]
 
 private let dangerousPatterns = [
