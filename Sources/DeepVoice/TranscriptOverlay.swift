@@ -2,6 +2,8 @@ import AppKit
 import Combine
 import SwiftUI
 
+private let transcriptVisibilityKey = "transcriptVisible"
+
 struct TranscriptEntry: Identifiable {
     let id = UUID()
     let role: String
@@ -31,15 +33,14 @@ struct TranscriptEntry: Identifiable {
 final class TranscriptStore: ObservableObject {
     @Published private(set) var entries: [TranscriptEntry] = []
     @Published var isVisible: Bool {
-        didSet { UserDefaults.standard.set(isVisible, forKey: Self.visibilityKey) }
+        didSet { UserDefaults.standard.set(isVisible, forKey: transcriptVisibilityKey) }
     }
 
-    static let visibilityKey = "transcriptVisible"
     private static let maxEntries = 20
     private var defaultsObserver: AnyCancellable?
 
     init() {
-        isVisible = UserDefaults.standard.bool(forKey: Self.visibilityKey)
+        isVisible = UserDefaults.standard.bool(forKey: transcriptVisibilityKey)
         defaultsObserver = UserDefaults.standard
             .publisher(for: \.transcriptVisible)
             .receive(on: RunLoop.main)
@@ -60,7 +61,7 @@ final class TranscriptStore: ObservableObject {
 
 extension UserDefaults {
     @objc dynamic var transcriptVisible: Bool {
-        bool(forKey: TranscriptStore.visibilityKey)
+        bool(forKey: transcriptVisibilityKey)
     }
 }
 
@@ -115,4 +116,3 @@ private struct TranscriptBubble: View {
             : AnyShapeStyle(Color(white: 0.5, opacity: 0.12))
     }
 }
-

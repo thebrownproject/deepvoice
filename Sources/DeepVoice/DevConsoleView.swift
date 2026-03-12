@@ -8,6 +8,7 @@ struct DevConsoleActions {
     var onClearLog: () -> Void = {}
 }
 
+@MainActor
 struct DevConsoleView: View {
     var state: DevConsoleState
     var actions: DevConsoleActions

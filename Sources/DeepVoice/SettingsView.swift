@@ -12,7 +12,7 @@ struct SettingsView: View {
     @State private var sttModelDraft = DeepVoiceConfig.defaults.sttModel
     @State private var hasLoadedConfig = false
 
-    @AppStorage(TranscriptStore.visibilityKey) private var transcriptVisible = false
+    @AppStorage(transcriptVisibilityKey) private var transcriptVisible = false
 
     var body: some View {
         Form {

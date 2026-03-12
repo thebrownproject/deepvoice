@@ -140,6 +140,7 @@ private func runProcess(
     let result: String = try await withCheckedThrowingContinuation { continuation in
         let once = OnceFlag()
 
+        @Sendable
         func cleanup() {
             stdoutHandle.readabilityHandler = nil
             stderrHandle.readabilityHandler = nil

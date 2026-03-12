@@ -263,13 +263,17 @@ final class VoiceAgentRuntime {
 
         observers.append(
             center.addObserver(forName: .deepVoiceConfigDidChange, object: nil, queue: .main) { [weak self] _ in
-                self?.handleConfigDidChange()
+                Task { @MainActor [weak self] in
+                    self?.handleConfigDidChange()
+                }
             }
         )
 
         observers.append(
             center.addObserver(forName: .deepVoiceAPIKeysDidChange, object: nil, queue: .main) { [weak self] notification in
-                self?.handleAPIKeysDidChange(notification)
+                Task { @MainActor [weak self] in
+                    self?.handleAPIKeysDidChange(notification)
+                }
             }
         )
     }
