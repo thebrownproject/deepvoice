@@ -42,10 +42,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         hotkeyManager.delegate = self
         agentClient.delegate = self
+        audioManager.setRouteMode(configStore.config.audioRouteMode)
 
         audioManager.onStateChange = { [weak self] capturing, playing in
-            self?.consoleState.isCapturing = capturing
-            self?.consoleState.isPlaying = playing
+            guard let self else { return }
+            self.consoleState.isCapturing = capturing
+            self.consoleState.isPlaying = playing
+            self.consoleState.log("Audio state: capturing=\(capturing), playing=\(playing)", level: .debug)
+        }
+        audioManager.onCaptureError = { [weak self] message in
+            self?.consoleState.log(message, level: .error)
         }
 
         Task {
@@ -57,6 +63,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         DeepVoiceConfig.bootstrapStorage()
 
         consoleState.log("Config loaded (llm: \(configStore.config.llmProvider)/\(configStore.config.llmModel))")
+        consoleState.log("Audio route mode: \(configStore.config.audioRouteMode.title)")
 
         for account in KeychainAccount.allCases {
             if KeychainHelper.loadAPIKey(for: account) != nil {
@@ -145,11 +152,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             withObservationTracking {
                 _ = configStore.config.confirmDestructive
                 _ = configStore.config.safeMode
+                _ = configStore.config.audioRouteMode
             } onChange: {
                 Task { @MainActor [weak self] in
                     guard let self else { return }
                     registry.updateConfirmDestructive(self.configStore.config.confirmDestructive)
                     registry.updateSafeMode(self.configStore.config.safeMode)
+                    self.audioManager.setRouteMode(self.configStore.config.audioRouteMode)
+                    self.consoleState.log("Audio route mode updated to \(self.configStore.config.audioRouteMode.title)")
+                    if self.consoleState.connectionState != .disconnected {
+                        self.consoleState.log("Audio route changes apply on the next session", level: .warning)
+                    }
                     observe() // re-register for next change
                 }
             }

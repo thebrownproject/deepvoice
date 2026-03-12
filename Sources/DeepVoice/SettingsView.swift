@@ -84,6 +84,18 @@ struct SettingsView: View {
                 }
             }
 
+            Section("Audio") {
+                Picker("Route mode", selection: $store.config.audioRouteMode) {
+                    ForEach(AudioRouteMode.allCases) { mode in
+                        Text(mode.title).tag(mode)
+                    }
+                }
+
+                Text(store.config.audioRouteMode.summary)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             // Models
             Section("Models") {
                 LabeledContent("LLM") {
@@ -118,7 +130,7 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .frame(width: 440, height: 560)
+        .frame(width: 440, height: 620)
         .onAppear { loadKeys() }
     }
 

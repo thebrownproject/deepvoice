@@ -3,12 +3,38 @@ import os
 
 private let log = Logger(subsystem: "com.thebrownproject.deepvoice", category: "Config")
 
+enum AudioRouteMode: String, Codable, CaseIterable, Equatable, Identifiable {
+    case highQualityOutput = "high_quality_output"
+    case headsetConversation = "headset_conversation"
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .highQualityOutput:
+            return "Clear Output"
+        case .headsetConversation:
+            return "AirPods Mic"
+        }
+    }
+
+    var summary: String {
+        switch self {
+        case .highQualityOutput:
+            return "Use a non-Bluetooth mic to keep AirPods playback clear."
+        case .headsetConversation:
+            return "Use the headset mic with voice processing. Best for natural conversation, but Bluetooth audio may switch into call quality."
+        }
+    }
+}
+
 struct DeepVoiceConfig: Codable, Equatable {
     var sttProvider: String
     var ttsProvider: String
     var llmProvider: String
     var llmModel: String
     var voice: String
+    var audioRouteMode: AudioRouteMode
     var safeMode: Bool
     var confirmDestructive: Bool
 
@@ -18,6 +44,7 @@ struct DeepVoiceConfig: Codable, Equatable {
         case llmProvider = "llm_provider"
         case llmModel = "llm_model"
         case voice
+        case audioRouteMode = "audio_route_mode"
         case safeMode = "safe_mode"
         case confirmDestructive = "confirm_destructive"
     }
@@ -28,6 +55,7 @@ struct DeepVoiceConfig: Codable, Equatable {
         llmProvider: "openrouter",
         llmModel: "google/gemini-3.1-flash-lite-preview",
         voice: "aura-2-vesta-en",
+        audioRouteMode: .highQualityOutput,
         safeMode: false,
         confirmDestructive: true
     )
@@ -117,4 +145,3 @@ final class ConfigStore {
         }
     }
 }
-

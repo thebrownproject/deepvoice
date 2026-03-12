@@ -11,6 +11,7 @@ struct DevConsoleActions {
 struct DevConsoleView: View {
     var state: DevConsoleState
     var actions: DevConsoleActions
+    @Environment(\.openSettings) private var openSettings
 
     private static let timeFormatter: DateFormatter = {
         let f = DateFormatter()
@@ -191,7 +192,9 @@ struct DevConsoleView: View {
 
             Spacer()
 
-            Button(action: openSettings) {
+            Button {
+                openSettings()
+            } label: {
                 Image(systemName: "gear")
             }
             .buttonStyle(.bordered)
@@ -216,8 +219,4 @@ struct DevConsoleView: View {
         NSPasteboard.general.setString(text, forType: .string)
     }
 
-    private func openSettings() {
-        NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
-        NSApp.activate(ignoringOtherApps: true)
-    }
 }

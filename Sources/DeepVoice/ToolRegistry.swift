@@ -18,7 +18,7 @@ final class ToolRegistry: @unchecked Sendable {
     /// When true, destructive tools require user approval. Updated from ConfigStore.
     private var _confirmDestructive: Bool = true
     /// When true, destructive tools are blocked entirely.
-    private var _safeMode: Bool = true
+    private var _safeMode: Bool = false
 
     @MainActor
     func setConfigStore(_ store: ConfigStore) {
