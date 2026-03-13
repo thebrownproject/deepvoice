@@ -6,13 +6,13 @@ final class CompanionPanel: NSPanel {
 
     init(state: DevConsoleState, actions: DevConsoleActions, configStore: ConfigStore) {
         super.init(
-            contentRect: NSRect(x: 0, y: 0, width: 400, height: 520),
+            contentRect: NSRect(x: 0, y: 0, width: 280, height: 380),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
         )
 
-        level = .floating
+        level = .statusBar
         isOpaque = false
         backgroundColor = .clear
         hasShadow = true

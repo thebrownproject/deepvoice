@@ -15,6 +15,8 @@ enum DeepgramVoice: String, CaseIterable, Identifiable {
     case aura2OrpheusEn = "aura-2-orpheus-en"
     case aura2ApolloEn = "aura-2-apollo-en"
     case aura2VestaEn = "aura-2-vesta-en"
+    case aura2ArcasEn = "aura-2-arcas-en"
+    case aura2AriesEn = "aura-2-aries-en"
     case aura2ZeusEn = "aura-2-zeus-en"
     // Aura-1 (legacy)
     case auraAsteriaEn = "aura-asteria-en"

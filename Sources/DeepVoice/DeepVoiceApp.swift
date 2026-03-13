@@ -31,6 +31,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private var pendingContinuations: [String: CheckedContinuation<Bool, Never>] = [:]
     private var alwaysApprovedTools: Set<String> = []
+    private var isSessionActive = false
+    private var isAgentThinking = false
+    private var thinkingResetTask: Task<Void, Never>?
+    private let thinkingHoldDuration: UInt64 = 900_000_000
 
     lazy var consoleActions: DevConsoleActions = DevConsoleActions(
         onTalkToggle: { [weak self] in self?.toggleListening() },
@@ -49,6 +53,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard let self else { return }
             self.consoleState.isCapturing = capturing
             self.consoleState.isPlaying = playing
+            self.resolveAppState(reason: "audio state changed")
             self.consoleState.log("Audio state: capturing=\(capturing), playing=\(playing)", level: .debug)
         }
         audioManager.onCaptureEnergy = { [weak self] energy in
@@ -110,6 +115,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         agentClient.disconnect()
         audioManager.stopCapture()
+        resetSessionState()
     }
 
     // MARK: - Session control
@@ -135,6 +141,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         consoleState.connectionState = .connecting
+        isSessionActive = true
+        resolveAppState(reason: "session starting")
         consoleState.log("Connecting to Voice Agent...")
 
         agentClient.connect(apiKey: deepgramKey)
@@ -143,19 +151,56 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func stopSession() {
         agentClient.disconnect()
         audioManager.stopCapture()
-        setState(.idle)
+        resetSessionState()
         consoleState.connectionState = .disconnected
         consoleState.log("Session stopped")
     }
 
     private func interruptSession() {
         audioManager.stopPlayback()
-        setState(.listening)
+        isAgentThinking = false
+        thinkingResetTask?.cancel()
+        resolveAppState(reason: "interrupt")
         consoleState.log("Interrupted -- resuming listen")
     }
 
-    private func setState(_ newState: AppState) {
-        consoleState.appState = newState
+    private func resetSessionState() {
+        thinkingResetTask?.cancel()
+        thinkingResetTask = nil
+        isSessionActive = false
+        isAgentThinking = false
+        resolveAppState(reason: "session reset")
+    }
+
+    private func holdThinkingState() {
+        thinkingResetTask?.cancel()
+        let holdDuration = thinkingHoldDuration
+
+        thinkingResetTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: holdDuration)
+            guard let self, !Task.isCancelled else { return }
+            self.isAgentThinking = false
+            self.resolveAppState(reason: "thinking timeout")
+        }
+    }
+
+    private func resolveAppState(reason: String) {
+        let newState: AppState
+
+        if !isSessionActive {
+            newState = .idle
+        } else if consoleState.isPlaying {
+            newState = .speaking
+        } else if isAgentThinking {
+            newState = .thinking
+        } else {
+            newState = .listening
+        }
+
+        if consoleState.appState != newState {
+            consoleState.log("UI state -> \(newState.rawValue) (\(reason))", level: .debug)
+            consoleState.appState = newState
+        }
     }
 
     private func observeConfigChanges(registry: ToolRegistry) {
@@ -251,7 +296,7 @@ extension AppDelegate: DeepgramAgentDelegate {
                 config: self.configStore.config,
                 toolRegistry: registry,
                 openRouterKey: orKey,
-                greeting: hasHistory ? nil : "Hey there!"
+                greeting: hasHistory ? nil : "Hey there"
             )
             self.agentClient.sendSettings(settings)
         }
@@ -267,7 +312,7 @@ extension AppDelegate: DeepgramAgentDelegate {
                 self.consoleState.log("Voice Agent disconnected")
             }
             self.audioManager.stopCapture()
-            self.setState(.idle)
+            self.resetSessionState()
         }
     }
 
@@ -279,7 +324,9 @@ extension AppDelegate: DeepgramAgentDelegate {
             // Inject previous conversation history so the agent has context
             self.injectConversationHistory()
 
-            self.setState(.listening)
+            self.isSessionActive = true
+            self.isAgentThinking = false
+            self.resolveAppState(reason: "settings applied")
 
             // Brief delay so greeting audio can start playing before capture
             // engine init (VPIO setup can disrupt in-progress playback)
@@ -299,7 +346,7 @@ extension AppDelegate: DeepgramAgentDelegate {
         guard !entries.isEmpty else { return }
 
         // Skip greetings
-        let meaningful = entries.filter { !($0.role == "assistant" && $0.text == "Hey there!") }
+        let meaningful = entries.filter { !($0.role == "assistant" && $0.text == "Hey there") }
         guard !meaningful.isEmpty else { return }
 
         // Build a conversation summary to prepend to the system prompt
@@ -331,21 +378,27 @@ extension AppDelegate: DeepgramAgentDelegate {
         Task { @MainActor [weak self] in
             guard let self else { return }
             self.audioManager.stopPlayback()
-            self.setState(.listening)
+            self.isAgentThinking = false
+            self.thinkingResetTask?.cancel()
+            self.resolveAppState(reason: "user speaking")
         }
     }
 
     nonisolated func agentDidStartThinking(content: String) {
         Task { @MainActor [weak self] in
             guard let self else { return }
-            self.setState(.thinking)
+            self.isAgentThinking = true
+            self.resolveAppState(reason: "agent thinking")
+            self.holdThinkingState()
         }
     }
 
     nonisolated func agentDidStartSpeaking(totalLatency: Double, ttsLatency: Double, llmLatency: Double) {
         Task { @MainActor [weak self] in
             guard let self else { return }
-            self.setState(.speaking)
+            self.thinkingResetTask?.cancel()
+            self.isAgentThinking = false
+            self.resolveAppState(reason: "agent speaking")
             let totalMs = Int(totalLatency * 1000)
             let ttsMs = Int(ttsLatency * 1000)
             let llmMs = Int(llmLatency * 1000)
@@ -363,6 +416,8 @@ extension AppDelegate: DeepgramAgentDelegate {
         // the next UserStartedSpeaking or AgentThinking event will drive state.
         Task { @MainActor [weak self] in
             guard let self else { return }
+            self.isAgentThinking = false
+            self.resolveAppState(reason: "agent audio done")
             self.consoleState.log("Agent audio stream complete", level: .debug)
         }
     }

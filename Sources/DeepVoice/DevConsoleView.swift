@@ -46,6 +46,8 @@ struct DevConsoleView: View {
             statusCapsule(connectionLabel, color: connectionColor)
             statusCapsule(state.isCapturing ? "Mic: on" : "Mic: off",
                           color: state.isCapturing ? .blue : .gray)
+            statusCapsule(String(format: "Cap: %.2f", state.captureEnergy), color: .blue)
+            statusCapsule(String(format: "Play: %.2f", state.playbackEnergy), color: .green)
             if state.isPlaying {
                 statusCapsule("Playing", color: .green)
             }

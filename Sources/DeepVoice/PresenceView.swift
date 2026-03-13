@@ -1,29 +1,21 @@
 import SwiftUI
 
 /// Animated ring presence drawn with SwiftUI Canvas.
-/// Three chromatic ring layers (peach/coral/rose) with sinusoidal noise on the radius,
-/// responding to app state and audio energy. The ring IS the agent's body:
-/// - Speaking: breathes outward with TTS energy, glow expands, chromatic layers separate
-/// - Listening: warmth increases, radius tightens inward, chromatic layers converge
-/// - Idle/Thinking: own internal animation, no external audio driving it
+/// The important detail is that the animation clock lives in SwiftUI state,
+/// so parent-driven view reconstruction does not reset elapsed time.
 struct PresenceView: View {
     var appState: AppState
-    var captureEnergy: CGFloat   // 0..1 mic RMS (user speaking)
-    var playbackEnergy: CGFloat  // 0..1 TTS RMS (agent speaking)
-
-    private let startDate = Date()
-
-    private static let peach = Color(red: 1.0, green: 0.75, blue: 0.58)
-    private static let coral = Color(red: 0.96, green: 0.55, blue: 0.48)
-    private static let rose  = Color(red: 0.84, green: 0.44, blue: 0.60)
+    var captureEnergy: CGFloat
+    var playbackEnergy: CGFloat
 
     private struct RingParams {
         var thickness: CGFloat
         var speed: CGFloat
-        var radius: CGFloat   // fraction of min(w,h)/2
+        var radius: CGFloat
         var glow: CGFloat
         var opacity: CGFloat
-        var chromaticSpread: CGFloat // 0=converged, 1=normal spread
+        var chromaticSpread: CGFloat
+        var noise: CGFloat
 
         func lerped(toward target: RingParams, factor: CGFloat) -> RingParams {
             RingParams(
@@ -32,184 +24,363 @@ struct PresenceView: View {
                 radius: radius + (target.radius - radius) * factor,
                 glow: glow + (target.glow - glow) * factor,
                 opacity: opacity + (target.opacity - opacity) * factor,
-                chromaticSpread: chromaticSpread + (target.chromaticSpread - chromaticSpread) * factor
+                chromaticSpread: chromaticSpread + (target.chromaticSpread - chromaticSpread) * factor,
+                noise: noise + (target.noise - noise) * factor
             )
         }
     }
 
-    @State private var current = RingParams(thickness: 1.8, speed: 0.6, radius: 0.60, glow: 0, opacity: 0.85, chromaticSpread: 1.0)
+    private static let red = Color(red: 1.0, green: 0.22, blue: 0.36)
+    private static let green = Color(red: 0.48, green: 1.0, blue: 0.42)
+    private static let blue = Color(red: 0.26, green: 0.48, blue: 1.0)
+    private static let coreTint = Color.white
+    private static let haloTint = Color(red: 0.92, green: 0.96, blue: 1.0)
+
+    private static let layers: [(color: Color, seed: Double, thicknessFactor: CGFloat, speedMul: Double, alpha: Double)] = [
+        (red, 42.0, 1.0, 0.985, 0.9),
+        (green, 18.0, 0.96, 1.0, 0.9),
+        (blue, 71.0, 0.92, 1.015, 0.9),
+    ]
+
+    @State private var startDate = Date()
+    @State private var current = RingParams(
+        thickness: 1.8,
+        speed: 0.6,
+        radius: 0.60,
+        glow: 0,
+        opacity: 0.85,
+        chromaticSpread: 1.0,
+        noise: 0.007
+    )
     @State private var lastFrameTime: TimeInterval = 0
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 1.0 / 60.0)) { context in
+            let elapsed = max(context.date.timeIntervalSince(startDate), 0)
+
+            Canvas(opaque: false, colorMode: .linear, rendersAsynchronously: false) { ctx, size in
+                drawRing(in: &ctx, size: size, elapsed: elapsed)
+            }
+            .onAppear {
+                if lastFrameTime == 0 {
+                    lastFrameTime = elapsed
+                }
+            }
+            .onChange(of: context.date, initial: true) { _, newDate in
+                let elapsed = max(newDate.timeIntervalSince(startDate), 0)
+                advanceAnimation(to: elapsed)
+            }
+        }
+    }
 
     private func targetParams() -> RingParams {
         switch appState {
         case .idle, .error:
-            return RingParams(thickness: 1.8, speed: 0.6, radius: 0.60, glow: 0, opacity: 0.85, chromaticSpread: 1.0)
+            return RingParams(
+                thickness: 1.9,
+                speed: 0.5,
+                radius: 0.53,
+                glow: 0.035,
+                opacity: 0.84,
+                chromaticSpread: 1.0,
+                noise: 0.007
+            )
 
         case .listening:
-            // Attentiveness: warmth up, radius tightens inward, layers converge
-            let e = captureEnergy
+            let energy = captureEnergy
             return RingParams(
-                thickness: 2.2 + e * 1.0,
-                speed: 0.8 + e * 0.2,
-                radius: 0.60 - e * 0.03,       // tighten inward (leaning in)
-                glow: 0,
-                opacity: 0.85 + e * 0.15,       // more vivid/opaque with voice
-                chromaticSpread: 1.0 - e * 0.7  // layers converge (concentrating)
+                thickness: 2.05 + energy * 0.45,
+                speed: 0.86 + energy * 0.25,
+                radius: 0.515 - energy * 0.012,
+                glow: 0.05 + energy * 0.04,
+                opacity: 0.9,
+                chromaticSpread: 0.74 - energy * 0.12,
+                noise: 0.0085 + energy * 0.003
             )
 
         case .thinking:
-            return RingParams(thickness: 2.0, speed: 1.6, radius: 0.58, glow: 0, opacity: 0.85, chromaticSpread: 0.6)
+            return RingParams(
+                thickness: 2.0,
+                speed: 1.34,
+                radius: 0.525,
+                glow: 0.045,
+                opacity: 0.88,
+                chromaticSpread: 0.88,
+                noise: 0.011
+            )
 
         case .speaking:
-            // Expression: bloom outward, glow expands, layers separate
-            let e = playbackEnergy
+            let energy = playbackEnergy
             return RingParams(
-                thickness: 2.8 + e * 2.5,
-                speed: 1.0,
-                radius: 0.66 + e * 0.04,        // bloom outward
-                glow: 0.15 + e * 0.15,
-                opacity: 0.85,
-                chromaticSpread: 1.0 + e * 0.4   // layers separate further
+                thickness: 2.2 + energy * 0.85,
+                speed: 1.0 + energy * 0.34,
+                radius: 0.545 + energy * 0.02,
+                glow: 0.08 + energy * 0.14,
+                opacity: 0.96,
+                chromaticSpread: 1.14 + energy * 0.25,
+                noise: 0.0105 + energy * 0.007
             )
         }
     }
 
-    // Per-layer speed multipliers and seed offsets for chromatic drift.
-    // chromaticSpread modulates the effective speed difference between layers.
-    private static let layers: [(color: Color, seed: Double, thicknessFactor: CGFloat, speedMul: Double)] = [
-        (peach, 42.0, 1.0,  0.95),
-        (coral, 18.0, 0.85, 1.0),
-        (rose,  71.0, 0.95, 1.05),
-    ]
+    private func advanceAnimation(to elapsed: TimeInterval) {
+        let target = targetParams()
+        let dt = max(elapsed - lastFrameTime, 1.0 / 120.0)
+        let factor = CGFloat(1.0 - exp(-dt * 8.0))
 
-    var body: some View {
-        TimelineView(.animation) { timeline in
-            let elapsed = timeline.date.timeIntervalSince(startDate)
-            let target = targetParams()
+        current = current.lerped(toward: target, factor: factor)
+        lastFrameTime = elapsed
+    }
 
-            let dt = max(elapsed - lastFrameTime, 0.001)
-            let factor = CGFloat(1.0 - exp(-dt * 8.0))
+    private func drawRing(in ctx: inout GraphicsContext, size: CGSize, elapsed: TimeInterval) {
+        let dim = min(size.width, size.height)
+        let center = CGPoint(x: size.width / 2, y: size.height / 2)
 
-            Canvas { ctx, size in
-                let dim = min(size.width, size.height)
-                let center = CGPoint(x: size.width / 2, y: size.height / 2)
+        let phase = elapsed * Double(current.speed)
+        let idleBreath = (appState == .idle || appState == .error)
+            ? sin(elapsed * 2.0 * .pi / 4.0) * 0.012
+            : 0.0
+        let pulsePhase = 0.5 + 0.5 * sin(phase * 2.8)
+        let statePulse: Double = switch appState {
+        case .idle, .error:
+            0.0
+        case .listening:
+            -(0.008 + pulsePhase * 0.012) * (0.75 + Double(captureEnergy) * 0.25)
+        case .thinking:
+            sin(phase * 1.7) * 0.003
+        case .speaking:
+            (0.012 + pulsePhase * (0.018 + Double(playbackEnergy) * 0.02)) * (0.8 + Double(playbackEnergy) * 0.2)
+        }
+        let baseRadius = dim / 2 * (current.radius + CGFloat(idleBreath + statePulse))
 
-                // Idle breathing: subtle sine modulation (~4s period)
-                let breath = (appState == .idle || appState == .error)
-                    ? sin(elapsed * 2.0 * .pi / 4.0) * 0.015 : 0.0
-                let baseRadius = dim / 2 * (current.radius + CGFloat(breath))
-                let t = elapsed * Double(current.speed)
+        let activeEnergy: CGFloat = switch appState {
+        case .idle, .error: 0.018
+        case .listening: 0.04 + captureEnergy * 0.12
+        case .thinking: 0.055
+        case .speaking: 0.06 + playbackEnergy * 0.25
+        }
 
-                // Determine effective energy for ring noise amplitude
-                let activeEnergy: CGFloat = switch appState {
-                case .listening: captureEnergy * 0.5  // subtle response
-                case .speaking: playbackEnergy
-                default: 0
-                }
+        let innerPresence = switch appState {
+        case .idle, .error: 0.16
+        case .listening: 0.19
+        case .thinking: 0.17
+        case .speaking: 0.22 + Double(current.glow) * 0.08
+        }
 
-                // Glow (speaking only)
-                if current.glow > 0.01 {
-                    let glowColor = Color(red: 0.98, green: 0.65, blue: 0.53)
-                    let glowSpread = dim * 0.12
-                    let gradient = GraphicsContext.Shading.radialGradient(
-                        Gradient(stops: [
-                            .init(color: glowColor.opacity(Double(current.glow) * 0.6), location: 0.0),
-                            .init(color: glowColor.opacity(Double(current.glow) * 0.25), location: 0.5),
-                            .init(color: glowColor.opacity(0), location: 1.0),
-                        ]),
-                        center: center,
-                        startRadius: baseRadius - dim * 0.02,
-                        endRadius: baseRadius + glowSpread
-                    )
-                    let r = baseRadius + glowSpread
-                    ctx.fill(
-                        Path(ellipseIn: CGRect(x: center.x - r, y: center.y - r, width: r * 2, height: r * 2)),
-                        with: gradient
-                    )
-                }
+        let coreGradient = GraphicsContext.Shading.radialGradient(
+            Gradient(stops: [
+                .init(color: Self.coreTint.opacity(innerPresence), location: 0.0),
+                .init(color: Self.coreTint.opacity(innerPresence * 0.82), location: 0.45),
+                .init(color: Self.coreTint.opacity(innerPresence * 0.45), location: 0.8),
+                .init(color: Self.coreTint.opacity(0), location: 1.0),
+            ]),
+            center: center,
+            startRadius: 0,
+            endRadius: baseRadius * 0.9
+        )
 
-                // Chromatic spread: interpolate each layer's speed toward 1.0 as spread decreases
-                let spread = Double(current.chromaticSpread)
+        let coreRadius = baseRadius * 0.88
+        ctx.fill(
+            Path(ellipseIn: CGRect(
+                x: center.x - coreRadius,
+                y: center.y - coreRadius,
+                width: coreRadius * 2,
+                height: coreRadius * 2
+            )),
+            with: coreGradient
+        )
 
-                // Outer echo ring
-                let echoRadius = baseRadius * 1.15
-                let echoTime = elapsed * Double(current.speed) * 0.7
-                for layer in Self.layers {
-                    let layerSpeedMul = 1.0 + (layer.speedMul - 1.0) * spread
-                    let path = Self.ringPath(
-                        center: center,
-                        baseRadius: echoRadius,
-                        seed: layer.seed + 100,
-                        time: echoTime * layerSpeedMul,
-                        energy: activeEnergy * 0.4,
-                        dim: dim
-                    )
-                    ctx.stroke(
-                        path,
-                        with: .color(layer.color.opacity(Double(current.opacity) * 0.3)),
-                        style: StrokeStyle(
-                            lineWidth: current.thickness * layer.thicknessFactor * 0.5,
-                            lineCap: .round,
-                            lineJoin: .round
-                        )
-                    )
-                }
+        let highlightCenter = CGPoint(
+            x: center.x - baseRadius * 0.22,
+            y: center.y - baseRadius * 0.26
+        )
+        let highlight = GraphicsContext.Shading.radialGradient(
+            Gradient(stops: [
+                .init(color: .white.opacity(0.16), location: 0.0),
+                .init(color: .white.opacity(0.08), location: 0.35),
+                .init(color: .white.opacity(0), location: 1.0),
+            ]),
+            center: highlightCenter,
+            startRadius: 0,
+            endRadius: baseRadius * 0.42
+        )
+        ctx.fill(
+            Path(ellipseIn: CGRect(
+                x: center.x - coreRadius,
+                y: center.y - coreRadius,
+                width: coreRadius * 2,
+                height: coreRadius * 2
+            )),
+            with: highlight
+        )
 
-                // Primary chromatic ring layers
-                for layer in Self.layers {
-                    let layerSpeedMul = 1.0 + (layer.speedMul - 1.0) * spread
-                    let layerTime = t * layerSpeedMul
-                    let path = Self.ringPath(
-                        center: center,
-                        baseRadius: baseRadius,
-                        seed: layer.seed,
-                        time: layerTime,
-                        energy: activeEnergy,
-                        dim: dim
-                    )
-                    ctx.stroke(
-                        path,
-                        with: .color(layer.color.opacity(Double(current.opacity))),
-                        style: StrokeStyle(
-                            lineWidth: current.thickness * layer.thicknessFactor,
-                            lineCap: .round,
-                            lineJoin: .round
-                        )
-                    )
-                }
-            }
-            .onChange(of: elapsed) {
-                current = current.lerped(toward: target, factor: factor)
-                lastFrameTime = elapsed
-            }
+        if current.glow > 0.01 {
+            let glowSpread = dim * 0.06
+            let gradient = GraphicsContext.Shading.radialGradient(
+                Gradient(stops: [
+                    .init(color: Self.haloTint.opacity(Double(current.glow) * 0.16), location: 0.0),
+                    .init(color: Self.haloTint.opacity(Double(current.glow) * 0.07), location: 0.55),
+                    .init(color: Self.haloTint.opacity(0), location: 1.0),
+                ]),
+                center: center,
+                startRadius: baseRadius - dim * 0.01,
+                endRadius: baseRadius + glowSpread
+            )
+
+            let radius = baseRadius + glowSpread
+            ctx.fill(
+                Path(ellipseIn: CGRect(
+                    x: center.x - radius,
+                    y: center.y - radius,
+                    width: radius * 2,
+                    height: radius * 2
+                )),
+                with: gradient
+            )
+        }
+
+        ctx.blendMode = .plusLighter
+
+        let spread = Double(current.chromaticSpread)
+        let haloRadius = baseRadius * (1.008 + current.glow * 0.03)
+        let haloOpacity: Double = switch appState {
+        case .idle, .error: 0.045
+        case .listening: 0.05
+        case .thinking: 0.04
+        case .speaking: 0.07 + Double(current.glow) * 0.12
+        }
+
+        if haloOpacity > 0.01 {
+            let haloPath = Self.ringPath(
+                center: center,
+                baseRadius: haloRadius,
+                seed: 128,
+                time: phase * 0.92,
+                energy: activeEnergy * 0.35,
+                noise: current.noise * 0.6,
+                dim: dim
+            )
+
+            ctx.stroke(
+                haloPath,
+                with: .color(Self.haloTint.opacity(haloOpacity * 0.5)),
+                style: StrokeStyle(
+                    lineWidth: current.thickness * 1.35,
+                    lineCap: .round,
+                    lineJoin: .round
+                )
+            )
+            ctx.stroke(
+                haloPath,
+                with: .color(Self.haloTint.opacity(haloOpacity * 0.18)),
+                style: StrokeStyle(
+                    lineWidth: current.thickness * 2.4,
+                    lineCap: .round,
+                    lineJoin: .round
+                )
+            )
+        }
+
+        let accentRadius: CGFloat?
+        let accentOpacity: Double
+        let accentWidth: CGFloat
+        let accentSeed: Double
+        let accentTime: Double
+        let accentEnergy: CGFloat
+
+        switch appState {
+        case .listening:
+            accentRadius = baseRadius * CGFloat(0.94 - pulsePhase * 0.05)
+            accentOpacity = 0.18 + Double(captureEnergy) * 0.08
+            accentWidth = current.thickness * 0.58
+            accentSeed = 220
+            accentTime = phase * 1.18
+            accentEnergy = activeEnergy * 0.75
+        case .speaking:
+            accentRadius = baseRadius * CGFloat(1.03 + pulsePhase * (0.035 + Double(playbackEnergy) * 0.03))
+            accentOpacity = 0.16 + Double(current.glow) * 0.18
+            accentWidth = current.thickness * 0.62
+            accentSeed = 240
+            accentTime = phase * 1.05
+            accentEnergy = activeEnergy * 0.85
+        default:
+            accentRadius = nil
+            accentOpacity = 0
+            accentWidth = 0
+            accentSeed = 0
+            accentTime = 0
+            accentEnergy = 0
+        }
+
+        if let accentRadius {
+            let accentPath = Self.ringPath(
+                center: center,
+                baseRadius: accentRadius,
+                seed: accentSeed,
+                time: accentTime,
+                energy: accentEnergy,
+                noise: current.noise * 0.72,
+                dim: dim
+            )
+
+            ctx.stroke(
+                accentPath,
+                with: .color(.white.opacity(accentOpacity)),
+                style: StrokeStyle(
+                    lineWidth: accentWidth,
+                    lineCap: .round,
+                    lineJoin: .round
+                )
+            )
+        }
+
+        for layer in Self.layers {
+            let layerSpeedMul = 1.0 + (layer.speedMul - 1.0) * spread
+            let path = Self.ringPath(
+                center: center,
+                baseRadius: baseRadius,
+                seed: layer.seed,
+                time: phase * layerSpeedMul,
+                energy: activeEnergy,
+                noise: current.noise,
+                dim: dim
+            )
+            ctx.stroke(
+                path,
+                with: .color(layer.color.opacity(Double(current.opacity) * layer.alpha)),
+                style: StrokeStyle(
+                    lineWidth: current.thickness * layer.thicknessFactor,
+                    lineCap: .round,
+                    lineJoin: .round
+                )
+            )
         }
     }
 
-    /// Closed path for one ring layer with 3-octave sinusoidal noise on the radius.
     private static func ringPath(
         center: CGPoint,
         baseRadius: CGFloat,
         seed: Double,
         time: Double,
         energy: CGFloat,
+        noise: CGFloat,
         dim: CGFloat
     ) -> Path {
         let steps = 180
-        let amp = (0.004 + Double(energy) * 0.012) * Double(dim)
+        let amplitude = Double(noise + energy * 0.01) * Double(dim)
 
         var path = Path()
         for i in 0...steps {
             let fraction = Double(i) / Double(steps)
             let angle = fraction * 2.0 * .pi
 
-            let s1 = sin(angle * 5.0 - time * 1.2 + seed) * amp
-            let s2 = sin(angle * 3.0 + time * 0.9 + seed * 0.7) * (amp * 0.8)
-            let s3 = sin(angle * 7.0 - time * 0.6 + seed * 1.3) * (amp * 0.4)
-            let noise = s1 + s2 + s3
+            let s1 = sin(angle * 5.0 - time * 1.2 + seed) * amplitude
+            let s2 = sin(angle * 3.0 + time * 0.9 + seed * 0.7) * (amplitude * 0.8)
+            let s3 = sin(angle * 7.0 - time * 0.6 + seed * 1.3) * (amplitude * 0.4)
+            let radius = Double(baseRadius) + s1 + s2 + s3
 
-            let r = Double(baseRadius) + noise
-            let x = Double(center.x) + cos(angle) * r
-            let y = Double(center.y) + sin(angle) * r
+            let x = Double(center.x) + cos(angle) * radius
+            let y = Double(center.y) + sin(angle) * radius
 
             if i == 0 {
                 path.move(to: CGPoint(x: x, y: y))
@@ -217,6 +388,7 @@ struct PresenceView: View {
                 path.addLine(to: CGPoint(x: x, y: y))
             }
         }
+
         path.closeSubpath()
         return path
     }
