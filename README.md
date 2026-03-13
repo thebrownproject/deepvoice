@@ -10,7 +10,7 @@ Voice-first AI desktop companion for macOS. Pure Swift app with a single WebSock
 ## Architecture
 
 ```
-macOS App (SwiftUI/AppKit, AVAudioEngine + AudioUnit capture, hotkey, dev console)
+macOS App (SwiftUI/AppKit, floating companion orb + dev console)
     |
     | Single WebSocket (wss://agent.deepgram.com/v1/agent/converse)
     | - Binary frames: PCM16 24kHz mono audio (both directions)
@@ -58,7 +58,17 @@ Deepgram Voice Agent API (server-side orchestration)
 | `reason_deeply` | Delegation to gpt-5-mini for complex reasoning | No |
 | `web_search` | Web search via OpenAI Responses API | No |
 
-**Dev Console**
+**Companion Orb** (floating always-on-top panel)
+- Animated presence rings show idle/listening/thinking/speaking states
+- Liquid glass orb core on macOS 26+ (Tahoe)
+- Click orb to start/stop voice session
+- Hover to reveal control buttons (talk, stop, settings) with 400ms delay
+- Transcript text displays below orb, auto-dismisses 7s after playback stops
+- Hover orb to show last assistant reply even after dismiss
+- White cloud glow on hover when idle (PresenceView core without rings)
+- Always-on-top (.statusBar level), click-through when unfocused, visible on all spaces
+
+**Dev Console** (main window)
 - Real-time log with level filtering (info, warning, error, debug)
 - Live transcript display (user + assistant turns)
 - Tool approval UI with "always approve" option
@@ -95,10 +105,15 @@ DeepVoice/
 
         # App
         DeepVoiceApp.swift            # @main app, AppDelegate, delegate wiring
-        DevConsoleState.swift         # Console state, log entries, approvals
-        DevConsoleView.swift          # Dev console UI
+        DevConsoleState.swift         # Shared state: app state, log entries, approvals, transcript
+        DevConsoleView.swift          # Dev console UI (main window)
         SettingsView.swift            # API keys, voice, model settings
-        TranscriptOverlay.swift       # Live transcript display
+        TranscriptOverlay.swift       # Live transcript display + TranscriptEntry merge logic
+
+        # Companion (floating orb)
+        CompanionView.swift           # Floating orb UI: hover controls, click-to-talk, text display
+        CompanionPanel.swift          # NSPanel wrapper: always-on-top, click-through, positioning
+        PresenceView.swift            # Canvas-based animated rings with showRings parameter
 
         # Tools
         ToolRegistry.swift            # Tool registration, schemas, dispatch
@@ -167,7 +182,7 @@ Keychain: `com.thebrownproject.deepvoice` service.
 4. **Shell metacharacter blocking** -- safe_bash rejects `;|&\`$(){}\\!<>\n\r` before allowlist check to prevent injection
 5. **Tool name aliasing** -- LLMs call "bash" instead of "safe_bash". Fixed with prompt instructions, Deepgram alias registration, and client-side FunctionCallHandler mapping.
 6. **No Python backend** -- eliminates the local server, IPC protocol, and process management. One process, one WebSocket.
-7. **Dev console over floating widget** -- explicit visibility into agent state, logs, and tool calls during development
+7. **Dual-window UI** -- CompanionPanel (floating orb at .statusBar level) for always-visible voice control, DevConsoleView (main window) for development/debugging. Both share the same DevConsoleState and DevConsoleActions.
 8. **Two audio route modes** -- `Clear Output` uses HAL capture on a non-Bluetooth mic to preserve playback quality. `AirPods Mic` uses `VoiceProcessingIO` at 44.1kHz for headset capture, then converts to the 24kHz PCM16 wire format Deepgram expects.
 9. **Conversation history across reconnects** -- On WebSocket reconnect, transcript history is injected into the system prompt via `UpdatePrompt` so the agent has context from the current session.
 10. **ConfigStore as single source of truth** -- `@Observable` ConfigStore shared via SwiftUI `.environment()`. Settings UI binds directly. Config changes propagate live to ToolRegistry via `withObservationTracking`.

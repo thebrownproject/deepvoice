@@ -93,6 +93,12 @@ All 8 tools execute client-side. Voice Agent sends `FunctionCallRequest`, app ru
 10. **Conversation history via UpdatePrompt** -- On WebSocket reconnect, transcript history is injected into the system prompt via `UpdatePrompt`. Using `InjectUserMessage`/`InjectAgentMessage` causes the agent to re-execute old tool calls. History only persists within the app session (not across restarts).
 11. **Voice-first output formatting** -- System prompt instructs the LLM to never use markdown, backticks, asterisks, or bullet points since all output is spoken via TTS.
 12. **File-based API key fallback** -- Keychain access fails for unsigned `swift run` builds. `KeychainHelper` falls back to `~/.deepvoice/keys.json` (chmod 600, gitignored).
+13. **Dual-window UI** -- CompanionPanel (floating orb) at `.statusBar` level for always-visible speech control, DevConsoleView (main) for development/debugging. Both share the same `DevConsoleState` and `DevConsoleActions`. CompanionPanel uses `FirstMouseHostingView` (overrides `acceptsFirstMouse`) for click-through when unfocused.
+14. **PresenceView showRings parameter** -- Single Canvas-based animated rings component supports "core glow only" (`showRings: false`) for idle hover cloud effect and "full rings" (`showRings: true`) for active session feedback. Avoids duplicating the drawing code.
+15. **Text auto-dismiss on playback stop** -- Transcript text in CompanionView shows during speaking, auto-dismisses 7s after `isPlaying` goes false. New messages reset the timer. Hovering the orb re-shows dismissed text.
+16. **Glass effect .clear variant for text** -- `GlassCapsuleModifier` uses `.glassEffect(.clear)` on macOS 26+ with an explicit `.strokeBorder` overlay. The `.regular` variant causes a double-box deepening effect when the panel becomes key. Falls back to `.ultraThinMaterial` on older macOS.
+17. **No GlassEffectContainer** -- Wrapping CompanionView content in `GlassEffectContainer` destroys SwiftUI view identity on state changes, breaking `.onHover` tracking areas and `.task(id:)` reactivity. All content is inline in `body` for stable view identity.
+18. **CompanionPanel always visible** -- The panel is created and shown at launch, never hidden. `.canJoinAllSpaces` and `.fullScreenAuxiliary` ensure visibility across desktops and fullscreen apps. `hidesOnDeactivate: false` keeps it visible when the app loses focus.
 
 ## Conventions
 
@@ -105,6 +111,8 @@ All 8 tools execute client-side. Voice Agent sends `FunctionCallRequest`, app ru
 - All tool handlers have signature `(String) async throws -> String`
 - File-level `Logger` instances with subsystem `com.thebrownproject.deepvoice`
 - Audio state (isCapturing, isPlaying) pushed from AudioManager to DevConsoleState via callback, not computed properties (bridges `@unchecked Sendable` and `@Observable`)
+- In NSPanel/NSHostingView contexts, use `.task(id:)` instead of `.onChange`/`.onAppear` (they don't fire reliably in NSHostingView). Derive visibility from observable state in `body`, not from lifecycle callbacks.
+- `.onHover` must be on a view with stable identity. Never pass hover-dependent values as parameters to extracted `@ViewBuilder` methods, as changing parameters destroy view identity and kill hover tracking areas.
 
 ## Data Storage
 
