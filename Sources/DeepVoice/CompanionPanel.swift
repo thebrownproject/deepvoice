@@ -6,7 +6,7 @@ final class CompanionPanel: NSPanel {
 
     init(state: DevConsoleState, actions: DevConsoleActions, configStore: ConfigStore) {
         super.init(
-            contentRect: NSRect(x: 0, y: 0, width: 280, height: 380),
+            contentRect: NSRect(x: 0, y: 0, width: 240, height: 550),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
@@ -23,7 +23,7 @@ final class CompanionPanel: NSPanel {
         let rootView = CompanionView(state: state, actions: actions)
             .environment(configStore)
 
-        let hostingView = NSHostingView(rootView: rootView)
+        let hostingView = FirstMouseHostingView(rootView: rootView)
         hostingView.frame = contentRect(forFrameRect: frame)
         hostingView.autoresizingMask = [.width, .height]
 
@@ -43,4 +43,9 @@ final class CompanionPanel: NSPanel {
         let y = screenFrame.midY - frame.height / 2
         setFrameOrigin(NSPoint(x: x, y: y))
     }
+}
+
+/// NSHostingView subclass that accepts first mouse so clicks work without activating the app first.
+final class FirstMouseHostingView<Content: View>: NSHostingView<Content> {
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 }

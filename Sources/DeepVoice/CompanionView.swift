@@ -6,57 +6,140 @@ struct CompanionView: View {
 
     private let warmWhite = Color(red: 0.92, green: 0.88, blue: 0.84)
 
+    @State private var isHovering = false
+    @State private var showControls = false
+    @State private var hoverTask: Task<Void, Never>?
+    @State private var textDismissTask: Task<Void, Never>?
+    @State private var textDismissed = false
+    @State private var trackedEntryId: UUID?
+    @State private var wasPlaying = false
+
     /// The most recent assistant message.
     private var latestAssistantEntry: TranscriptEntry? {
         state.transcriptEntries.last(where: { !$0.isUser })
     }
 
-    /// Derived directly from observable state -- onChange doesn't fire in NSHostingView.
-    private var textVisible: Bool {
-        switch state.appState {
-        case .speaking: true
-        case .listening, .idle, .error: latestAssistantEntry != nil
-        case .thinking: false
-        }
+    /// Whether the orb is in an active session (not idle).
+    private var isActive: Bool {
+        state.appState != .idle && state.appState != .error
     }
 
     var body: some View {
-        VStack(spacing: 12) {
-            // Controls centered above the orb
-            controlBar
+        let currentEntryId = latestAssistantEntry?.id
+        let isNewEntry = currentEntryId != nil && currentEntryId != trackedEntryId
 
-            // Orb -- floating raw
-            PresenceView(appState: state.appState, captureEnergy: state.captureEnergy, playbackEnergy: state.playbackEnergy)
-                .frame(width: 220, height: 220)
+        // Show text when: hovering, or speaking/active and not yet dismissed
+        let textShowing: Bool = {
+            if isHovering && latestAssistantEntry != nil { return true }
+            if textDismissed && !isNewEntry { return false }
+            switch state.appState {
+            case .speaking: return true
+            case .listening, .idle, .error: return latestAssistantEntry != nil
+            case .thinking: return false
+            }
+        }()
 
-            // Text in its own glass capsule
-            consciousText
-                .frame(maxWidth: 260)
+        // Detect when playback stops to start dismiss timer
+        let currentlyPlaying = state.isPlaying
+
+        ZStack {
+            // Orb + controls pinned to center of frame
+            VStack(spacing: 0) {
+                // Controls -- hidden by default, pop up on hover with delay
+                controlBar
+                    .opacity(showControls ? 1.0 : 0)
+                    .offset(y: showControls ? 0 : 10)
+                    .animation(.easeOut(duration: 0.3), value: showControls)
+                    .padding(.bottom, -8)
+                    .zIndex(1)
+
+            ZStack {
+                // Glass core (always visible)
+                if #available(macOS 26.0, *) {
+                    Circle()
+                        .fill(.clear)
+                        .frame(width: 70, height: 70)
+                        .glassEffect(.clear, in: .circle)
+                } else {
+                    Circle()
+                        .fill(.ultraThinMaterial)
+                        .frame(width: 70, height: 70)
+                }
+
+                // Cloud glow on hover when idle (PresenceView core without rings)
+                PresenceView(appState: state.appState, captureEnergy: state.captureEnergy, playbackEnergy: state.playbackEnergy, showRings: false)
+                    .frame(width: 150, height: 150)
+                    .opacity(!isActive && isHovering ? 1.0 : 0)
+                    .animation(.easeInOut(duration: 0.5), value: isHovering)
+                    .animation(.easeInOut(duration: 0.5), value: isActive)
+
+                // Full rings (only when active session)
+                PresenceView(appState: state.appState, captureEnergy: state.captureEnergy, playbackEnergy: state.playbackEnergy, showRings: true)
+                    .frame(width: 150, height: 150)
+                    .opacity(isActive ? 1.0 : 0)
+                    .animation(.easeInOut(duration: 1.0), value: isActive)
+            }
+            .frame(width: 150, height: 150)
+            .onTapGesture {
+                actions.onTalkToggle()
+            }
+            } // end VStack (orb + controls)
+
+            // Text anchored below orb (top edge fixed), doesn't affect orb position
+            VStack {
+                Spacer().frame(height: 345)
+                if let entry = latestAssistantEntry {
+                    Text(entry.text)
+                        .font(.system(size: 13, weight: .regular, design: .default))
+                        .foregroundStyle(warmWhite)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 10)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .modifier(GlassCapsuleModifier(cornerRadius: 14))
+                        .frame(maxWidth: 220)
+                        .contentTransition(.opacity)
+                        .animation(.easeInOut(duration: 0.35), value: entry.text)
+                        .opacity(textShowing ? 1.0 : 0)
+                        .animation(.easeInOut(duration: 0.8), value: textShowing)
+                }
+                Spacer(minLength: 0)
+            }
         }
-        .frame(width: 280, height: 380)
-    }
-
-    // MARK: - Conscious Text
-
-    @ViewBuilder
-    private var consciousText: some View {
-        if let entry = latestAssistantEntry {
-            Text(entry.text)
-                .font(.system(size: 13, weight: .regular, design: .default))
-                .foregroundStyle(warmWhite)
-                .multilineTextAlignment(.center)
-                .lineLimit(3)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 10)
-                .fixedSize(horizontal: false, vertical: true)
-                .modifier(GlassCapsuleModifier(cornerRadius: 14))
-                .animation(.easeInOut(duration: 0.4), value: entry.text)
-                .opacity(textVisible ? 1.0 : 0)
-                .offset(y: textVisible ? 0 : 4)
-                .animation(.easeInOut(duration: 1.0), value: textVisible)
+        .frame(width: 240, height: 550)
+        .onHover { hovering in
+            isHovering = hovering
+            if hovering {
+                hoverTask?.cancel()
+                hoverTask = Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: 400_000_000)
+                    guard !Task.isCancelled else { return }
+                    showControls = true
+                }
+            } else {
+                hoverTask?.cancel()
+                showControls = false
+            }
+        }
+        .task(id: currentEntryId) {
+            guard let currentEntryId, currentEntryId != trackedEntryId else { return }
+            trackedEntryId = currentEntryId
+            textDismissed = false
+            textDismissTask?.cancel()
+        }
+        .task(id: currentlyPlaying) {
+            // Start 7s dismiss timer when playback stops
+            if wasPlaying && !currentlyPlaying {
+                textDismissTask?.cancel()
+                textDismissTask = Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: 7_000_000_000)
+                    guard !Task.isCancelled else { return }
+                    textDismissed = true
+                }
+            }
+            wasPlaying = currentlyPlaying
         }
     }
-
     // MARK: - Controls
 
     private var controlBar: some View {
@@ -140,7 +223,6 @@ struct CompanionView: View {
             .buttonStyle(.plain)
         }
     }
-
 }
 
 /// Applies liquid glass on macOS 26+, falls back to thin material.

@@ -7,6 +7,7 @@ struct PresenceView: View {
     var appState: AppState
     var captureEnergy: CGFloat
     var playbackEnergy: CGFloat
+    var showRings: Bool = true
 
     private struct RingParams {
         var thickness: CGFloat
@@ -50,7 +51,7 @@ struct PresenceView: View {
         glow: 0,
         opacity: 0.85,
         chromaticSpread: 1.0,
-        noise: 0.007
+        noise: 0.005
     )
     @State private var lastFrameTime: TimeInterval = 0
 
@@ -83,7 +84,7 @@ struct PresenceView: View {
                 glow: 0.035,
                 opacity: 0.84,
                 chromaticSpread: 1.0,
-                noise: 0.007
+                noise: 0.005
             )
 
         case .listening:
@@ -95,7 +96,7 @@ struct PresenceView: View {
                 glow: 0.05 + energy * 0.04,
                 opacity: 0.9,
                 chromaticSpread: 0.74 - energy * 0.12,
-                noise: 0.0085 + energy * 0.003
+                noise: 0.006 + energy * 0.002
             )
 
         case .thinking:
@@ -106,7 +107,7 @@ struct PresenceView: View {
                 glow: 0.045,
                 opacity: 0.88,
                 chromaticSpread: 0.88,
-                noise: 0.011
+                noise: 0.007
             )
 
         case .speaking:
@@ -118,7 +119,7 @@ struct PresenceView: View {
                 glow: 0.08 + energy * 0.14,
                 opacity: 0.96,
                 chromaticSpread: 1.14 + energy * 0.25,
-                noise: 0.0105 + energy * 0.007
+                noise: 0.007 + energy * 0.004
             )
         }
     }
@@ -238,6 +239,8 @@ struct PresenceView: View {
                 with: gradient
             )
         }
+
+        guard showRings else { return }
 
         ctx.blendMode = .plusLighter
 
