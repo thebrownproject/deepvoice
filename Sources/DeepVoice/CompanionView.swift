@@ -28,7 +28,6 @@ struct CompanionView: View {
         let currentEntryId = latestAssistantEntry?.id
         let isNewEntry = currentEntryId != nil && currentEntryId != trackedEntryId
 
-        // Show text when: hovering, or speaking/active and not yet dismissed
         let textShowing: Bool = {
             if isHovering && latestAssistantEntry != nil { return true }
             if textDismissed && !isNewEntry { return false }
@@ -39,7 +38,6 @@ struct CompanionView: View {
             }
         }()
 
-        // Detect when playback stops to start dismiss timer
         let currentlyPlaying = state.isPlaying
 
         ZStack {
@@ -53,37 +51,37 @@ struct CompanionView: View {
                     .padding(.bottom, -8)
                     .zIndex(1)
 
-            ZStack {
-                // Glass core (always visible)
-                if #available(macOS 26.0, *) {
-                    Circle()
-                        .fill(.clear)
-                        .frame(width: 70, height: 70)
-                        .glassEffect(.clear, in: .circle)
-                } else {
-                    Circle()
-                        .fill(.ultraThinMaterial)
-                        .frame(width: 70, height: 70)
+                ZStack {
+                    // Glass core (always visible)
+                    if #available(macOS 26.0, *) {
+                        Circle()
+                            .fill(.clear)
+                            .frame(width: 70, height: 70)
+                            .glassEffect(.clear, in: .circle)
+                    } else {
+                        Circle()
+                            .fill(.ultraThinMaterial)
+                            .frame(width: 70, height: 70)
+                    }
+
+                    // Cloud glow on hover when idle (PresenceView core without rings)
+                    PresenceView(appState: state.appState, captureEnergy: state.captureEnergy, playbackEnergy: state.playbackEnergy, showRings: false)
+                        .frame(width: 150, height: 150)
+                        .opacity(!isActive && isHovering ? 1.0 : 0)
+                        .animation(.easeInOut(duration: 0.5), value: isHovering)
+                        .animation(.easeInOut(duration: 0.5), value: isActive)
+
+                    // Full rings (only when active session)
+                    PresenceView(appState: state.appState, captureEnergy: state.captureEnergy, playbackEnergy: state.playbackEnergy, showRings: true)
+                        .frame(width: 150, height: 150)
+                        .opacity(isActive ? 1.0 : 0)
+                        .animation(.easeInOut(duration: 1.0), value: isActive)
                 }
-
-                // Cloud glow on hover when idle (PresenceView core without rings)
-                PresenceView(appState: state.appState, captureEnergy: state.captureEnergy, playbackEnergy: state.playbackEnergy, showRings: false)
-                    .frame(width: 150, height: 150)
-                    .opacity(!isActive && isHovering ? 1.0 : 0)
-                    .animation(.easeInOut(duration: 0.5), value: isHovering)
-                    .animation(.easeInOut(duration: 0.5), value: isActive)
-
-                // Full rings (only when active session)
-                PresenceView(appState: state.appState, captureEnergy: state.captureEnergy, playbackEnergy: state.playbackEnergy, showRings: true)
-                    .frame(width: 150, height: 150)
-                    .opacity(isActive ? 1.0 : 0)
-                    .animation(.easeInOut(duration: 1.0), value: isActive)
+                .frame(width: 150, height: 150)
+                .onTapGesture {
+                    actions.onTalkToggle()
+                }
             }
-            .frame(width: 150, height: 150)
-            .onTapGesture {
-                actions.onTalkToggle()
-            }
-            } // end VStack (orb + controls)
 
             // Text anchored below orb (top edge fixed), doesn't affect orb position
             VStack {
@@ -95,9 +93,9 @@ struct CompanionView: View {
                         .multilineTextAlignment(.center)
                         .padding(.horizontal, 16)
                         .padding(.vertical, 10)
+                        .frame(maxWidth: 220)
                         .fixedSize(horizontal: false, vertical: true)
                         .modifier(GlassCapsuleModifier(cornerRadius: 14))
-                        .frame(maxWidth: 220)
                         .contentTransition(.opacity)
                         .animation(.easeInOut(duration: 0.35), value: entry.text)
                         .opacity(textShowing ? 1.0 : 0)
@@ -140,6 +138,7 @@ struct CompanionView: View {
             wasPlaying = currentlyPlaying
         }
     }
+
     // MARK: - Controls
 
     private var controlBar: some View {
@@ -225,17 +224,26 @@ struct CompanionView: View {
     }
 }
 
-/// Applies liquid glass on macOS 26+, falls back to thin material.
+/// Glass capsule for transcript text. Uses .clear variant on macOS 26 to avoid
+/// the double-box deepening effect that .regular causes when the panel becomes key.
 private struct GlassCapsuleModifier: ViewModifier {
     let cornerRadius: CGFloat
 
     func body(content: Content) -> some View {
         if #available(macOS 26.0, *) {
             content
-                .glassEffect(.regular, in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+                .glassEffect(.clear, in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                        .strokeBorder(.white.opacity(0.08), lineWidth: 0.6)
+                }
         } else {
             content
                 .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                        .strokeBorder(.white.opacity(0.08), lineWidth: 0.6)
+                }
         }
     }
 }
